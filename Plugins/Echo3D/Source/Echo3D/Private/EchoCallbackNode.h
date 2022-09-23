@@ -5,6 +5,7 @@
 
 /**
  * probably deprecated node class to represent delayed actions.
+ * DONT USE
 **/
 UCLASS()
 class ECHO3D_API UEchoCallbackNode : public UBlueprintAsyncActionBase

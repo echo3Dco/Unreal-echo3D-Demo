@@ -1,6 +1,5 @@
 #pragma once
 #include "EchoImporter.h"
-
 //TODO: maybe put common echo types into a helper module both can rely on? or something?
 //TODO: fix all ascii <-> fstring conversion into one place and ensure its legit secure/correct
 //tho fstring->ascii might be lossy... =(
@@ -51,6 +50,9 @@ SOFTWARE.
 //break your limits, uint16_t vertex color data, GO!
 #include <limits>
 
+//hack
+//#include <unordered_map>
+
 #pragma optimize( "", off )
 
 //TODO: make it an importer flag??
@@ -67,7 +69,7 @@ namespace EchoImporterCpp
 
 	//a hack to detect and ignore dummy vertex color streams
 	//const bool hackVertexColorsV2 = false;
-	//const bool hackVertexColorsV2 = true; //now use UMeshLoader::allowBadVertexColorDetectionAndOmission
+	//const bool hackVertexColorsV2 = true; //now use UEchoImporter::allowBadVertexColorDetectionAndOmission
 	
 
 	const FString DefaultNullString(TEXT("<null>"));
@@ -115,6 +117,9 @@ namespace EchoImporterCpp
 	aiProcess_GenNormals
 	aiProcess_GenSmoothNormals
 	*/
+
+
+	const bool bVerboseImporterInternals = false;
 };
 using namespace EchoImporterCpp;
 
@@ -186,19 +191,24 @@ FString aiString2FString(const aiString &aiStr)
 //const bool bDebugMeshes = true;
 //UFUNCTION(BlueprintCallable,Category="Echo3dImporter")
 
-bool UMeshLoader::importerVerbose = false;
-bool UMeshLoader::importerVerboseTextures = false;
-bool UMeshLoader::debugVertexStreams = false;
-bool UMeshLoader::debugImportedHierarchy = false;
+bool UEchoImporter::hideDefaultUnwantedWarnings = true;
+bool UEchoImporter::importerVerbose = false;
+bool UEchoImporter::importerVerboseTextures = false;
+bool UEchoImporter::debugVertexStreams = false;
+bool UEchoImporter::debugImportedHierarchy = false;
 
-bool UMeshLoader::debugMaterialInfo = false;
+bool UEchoImporter::debugMaterialInfo = false;
 
+static const bool DefaultGenerateNormals = true;
+static const bool DefaultGenerateSmoothNormals = true;
+static const float DefaultSmoothNormalsAngle = 175.0f;
+static const bool DefaultVertexColorFix = true;
 
-bool UMeshLoader::stripNormals = false;
-bool UMeshLoader::generateNormals = true;
-bool UMeshLoader::generateSmoothNormals = true;
-bool UMeshLoader::allowBadVertexColorDetectionAndOmission = true;
-float UMeshLoader::smoothNormalsAngle = 175.0f;
+bool UEchoImporter::stripNormals = false;
+bool UEchoImporter::generateNormals = DefaultGenerateNormals;
+bool UEchoImporter::generateSmoothNormals = DefaultGenerateSmoothNormals;
+bool UEchoImporter::allowBadVertexColorDetectionAndOmission = DefaultVertexColorFix;
+float UEchoImporter::smoothNormalsAngle = DefaultSmoothNormalsAngle;//175.0f;
 
 struct MagicVertexColors
 {
@@ -394,6 +404,74 @@ FString propValueToStringWithType(const aiMaterialProperty *prop)
 	return typeName + TEXT(": ") + propValueToString(prop);
 }
 
+//meant to be faster than converting to fstring and checking vs == TEXT("") or some similar constant
+bool isEmptyString(const char *mData, unsigned int mDataLength)
+{
+	if (mData != nullptr)
+	{
+		//TODO: figure out how to sanely handle edge cases for these? aren't they widechars??
+		if (mDataLength < 1)
+		{
+			return false; //paranoia
+		}
+		//should be safe to dereference first char
+		//assuming here that mDataLength can't be zero
+		return (mData[0] == '\0');
+	}
+	return false;
+}
+
+//TODO: some of these probably only want to ignore on specific values
+//TODO: make these use assimp macros?
+//const std::unordered_map<FString, bool> ignorePropsDictionary = {
+namespace EchoImporterInternal
+{
+	//these should absolutely be reviewed/handled properly later where appropriate
+	const TMap<FString, bool> ignorePropsDictionary = {
+		{ TEXT("$mat.twosided"), true },
+		{ TEXT("$mat.gltf.alphaMode"), true }, 
+		{ TEXT("$mat.shadingm"), true }, 
+		{ TEXT("$tex.mappingfiltermag"), true }, 
+		{ TEXT("$tex.mappingfiltermin"), true }, 
+		{ TEXT("$tex.scale"), true }, 
+
+	};
+	bool shouldIgnoreProperty(const aiMaterialProperty *prop)
+	{
+		if (!UEchoImporter::hideDefaultUnwantedWarnings)
+		{
+			return false;
+		}
+		if (prop == nullptr)
+		{
+			return false; //something went wrong if asking about nullptr
+		}
+		FString propName = aiString2FString(prop->mKey);
+		//if (ignorePropsDictionary.find(propName) != ignorePropsDictionary.end())
+		if (ignorePropsDictionary.Contains(propName))// != ignorePropsDictionary.end())
+		{
+			return true;
+		}
+		return false;
+	}
+};
+using namespace EchoImporterInternal;
+
+///////////////////////// END HELPERS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 //Originally based on RML, but substantially modified
 FMeshData ProcessMesh(const FString &meshLabel, uint32 subMeshIndex, aiMesh* Mesh, const aiScene* Scene)
 {
@@ -405,7 +483,7 @@ FMeshData ProcessMesh(const FString &meshLabel, uint32 subMeshIndex, aiMesh* Mes
 	}
 	else
 	{
-		if (UMeshLoader::debugVertexStreams)
+		if (UEchoImporter::debugVertexStreams)
 		{
 			UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "MeshFile: %s[%i]: %s"), *meshLabel, subMeshIndex, *aiString2FString(Mesh->mName));
 		}
@@ -498,7 +576,7 @@ FMeshData ProcessMesh(const FString &meshLabel, uint32 subMeshIndex, aiMesh* Mes
 		//TODO: warn if lack texcoords or lack coords in expected indicies?
 	}
 
-	if (!bHaveTexCoords0)
+	if ((bHaveTexCoords) && (!bHaveTexCoords0))
 	{
 		UE_LOG(LogTemp, Warning, TEXT( LOG_INDENT "EchoImporter: ProcessMesh: %s[%i]: Model does not specify texCoord0, but specifies at least one texCoord channels: "), *meshLabel, subMeshIndex, numTexCoords);
 		int found = 0;
@@ -541,7 +619,7 @@ FMeshData ProcessMesh(const FString &meshLabel, uint32 subMeshIndex, aiMesh* Mes
 
 	//static int printMaxVerts = 64;//48 expected for test model
 	int printMaxVerts = 64;//48 expected for test model
-	if (UMeshLoader::debugVertexStreams)
+	if (UEchoImporter::debugVertexStreams)
 	{
 		UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "VERTEX COUNT=%i"), Mesh->mNumVertices);
 	}
@@ -551,7 +629,7 @@ FMeshData ProcessMesh(const FString &meshLabel, uint32 subMeshIndex, aiMesh* Mes
 	
 	bool bNonBlackVertexColorFound = true;//default assumption
 	//if (hackVertexColorsV2)
-	if (UMeshLoader::allowBadVertexColorDetectionAndOmission)
+	if (UEchoImporter::allowBadVertexColorDetectionAndOmission)
 	{
 		if (bHaveVertexColor0)
 		{
@@ -566,7 +644,10 @@ FMeshData ProcessMesh(const FString &meshLabel, uint32 subMeshIndex, aiMesh* Mes
 				}
 				else
 				{
-					UE_LOG(LogTemp, Error, TEXT("Mesh %s[%i]: Counterexample @ vertex[%i]: (%f, %f, %f, %f)"), *meshLabel, subMeshIndex, j, color.r, color.g, color.b, color.a); 
+					if (bVerboseImporterInternals)
+					{
+						UE_LOG(LogTemp, Error, TEXT("Mesh %s[%i]: Counterexample @ vertex[%i]: (%f, %f, %f, %f)"), *meshLabel, subMeshIndex, j, color.r, color.g, color.b, color.a); 
+					}
 					bNonBlackVertexColorFound = true;
 					break;
 				}
@@ -582,14 +663,14 @@ FMeshData ProcessMesh(const FString &meshLabel, uint32 subMeshIndex, aiMesh* Mes
 	//TODO: split these into several loops instead of branching everywhere inside a potentially huge inner loop
 	for (uint32 j = 0; j < Mesh->mNumVertices; ++j)
 	{
-		if (UMeshLoader::debugVertexStreams)
+		if (UEchoImporter::debugVertexStreams)
 		{
 			if (printMaxVerts>0)
 			{
 				printMaxVerts--;
 			}
 		}
-		const bool bPrintVert = UMeshLoader::debugVertexStreams && (printMaxVerts > 0);
+		const bool bPrintVert = UEchoImporter::debugVertexStreams && (printMaxVerts > 0);
 		if (bPrintVert)
 		{
 			UE_LOG(LogTemp, Log, TEXT( LOG_INDENT "Vertex: %i"), j);
@@ -901,7 +982,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 			if (!RunPostProcesStep(importer, filenameLabel, (withFlags), Scene)) { return false; }
 
 		//if (bStripNormals)
-		if (UMeshLoader::stripNormals)
+		if (UEchoImporter::stripNormals)
 		{
 			//bool ok;
 			RUN_POSTSTEP(StripNormalsFlags);
@@ -917,10 +998,10 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 			*/
 			//if (bGenerateNormalsAfterStripping)// ((runPostProcessingSteps & aiProcess_RemoveComponent) != 0)
 		}
-		if (UMeshLoader::generateNormals || UMeshLoader::generateSmoothNormals)
+		if (UEchoImporter::generateNormals || UEchoImporter::generateSmoothNormals)
 		{
 			//prefer smooth normals if both set
-			RUN_POSTSTEP(UMeshLoader::generateSmoothNormals ? FixSmoothNormalsFlags : FixNormalsFlags);
+			RUN_POSTSTEP(UEchoImporter::generateSmoothNormals ? FixSmoothNormalsFlags : FixNormalsFlags);
 
 			/*
 			ok = RunPostProcesStep(importer, filenameLabel, FixNormalsFlags, Scene);
@@ -1050,96 +1131,26 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 		}
 		////////////////////////////////////////
 		{
+			bool bPrintedAnyMatStuff = false;
+
 			//Scene->GetEmbeddedTexture
 			if (Scene->HasMaterials())
 			{
 				for(uint32 iMat=0; iMat<Scene->mNumMaterials; iMat++)
 				{
 					aiMaterial *mat = Scene->mMaterials[iMat];
+					//TODO: plaster bPrintedAnyMatStuff in fewer places
 					if (mat != nullptr)
 					{
 						
-						//if (UMeshLoader::importerVerbose)
-						if (UMeshLoader::debugMaterialInfo)
+						//if (UEchoImporter::importerVerbose)
+						if (UEchoImporter::debugMaterialInfo)
 						{
 							//mat->GetName not defined!? - looks like was some weird holdover from the old dll?
+							bPrintedAnyMatStuff = true;
 							UE_LOG(LogTemp, Log, TEXT("\tMat[%d]: %s"), iMat, *aiString2FString(mat->GetName()));
 							
-							/*
-							//Dump Raw
-							if (false)
-							{
-								for(unsigned int iMatProp=0; iMatProp<mat->mNumProperties; iMatProp++)
-								{
-									aiMaterialProperty *prop = mat->mProperties[iMatProp];
-									if (prop != nullptr)
-									{
-										#define LOG_INDENT "\t\t"
-										
-										if ((prop->mSemantic != aiTextureType_NONE) || (prop->mIndex != 0))
-										{
-											UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Prop[%d]: T_%d(T: %s) '%s' [%d] : S_%d(S: %s)"), 
-												iMatProp, 
-												prop->mType, *LookupMaterialPropertyTypeName(prop->mType), 
-												*aiString2FString(prop->mKey), prop->mIndex, 
-												prop->mSemantic, *LookupTextureTypeSemanticName(prop->mSemantic)
-											);
-										}
-										else
-										{
-											//UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Prop[%d]: T_%d(T: %s) '%s' [%d] : S_%d(S: %s)"), 
-											UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Prop[%d]: T_%d(T: %s) '%s' [%d]"), 
-												iMatProp, 
-												prop->mType, *LookupMaterialPropertyTypeName(prop->mType), 
-												*aiString2FString(prop->mKey)
-												//, prop->mIndex, 
-												//prop->mSemantic, *LookupTextureTypeSemanticName(prop->mSemantic)
-											);
-										}
-										#define LOG_INDENT "\t\t\t"
-										
-										switch(prop->mType)
-										{
-											MAT_PROP_CASE(prop, aiPTI_Float, float, 0.0f, "%f", L"float"); 
-											MAT_PROP_CASE(prop, aiPTI_Integer, int, 0, "%d", L"int"); 
-											MAT_PROP_CASE(prop, aiPTI_Double, double, 0.0, "%lf", L"double"); 
-									
-											case aiPTI_String:
-												{
-													FString str=L"<null>";
-													aiString *stringPtr = (aiString*)prop->mData;
-													if (stringPtr != nullptr)
-													{
-														str = aiString2FString(stringPtr);
-													}
-													else
-													{
-														//ok = 
-														str = TEXT("null");
-													}
-													UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "string: '%s'"), *str);
-												}
-												break;
-
-											case aiPTI_Buffer:
-												{
-													//TODO: print hex string of byte dump
-													UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "[Buffer]: ptr=0x%x, len=%d"), prop->mData, prop->mDataLength);
-												}
-												break;
-
-											default:
-												{
-													UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Unandled type: %d, ptr=0x%x, len=%d"), prop->mType, prop->mData, prop->mDataLength);
-												}
-												break;
-										}//end switch for print
-										
-									}
-								}
-							}//end if raw
-							*/
-
+							
 							if (true)
 							{
 								for(unsigned int iMatProp=0; iMatProp<mat->mNumProperties; iMatProp++)
@@ -1201,10 +1212,12 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 															bSkip = true;
 															if (count == 1)
 															{
+																bPrintedAnyMatStuff = true;
 																UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: %f"), *prefix, floatPtr[0]);
 															}
 															else if (count == 4)
 															{
+																bPrintedAnyMatStuff = true;
 																UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: (%f, %f, %f, %f)"), *prefix, floatPtr[0], floatPtr[1], floatPtr[2], floatPtr[3]);
 															}
 															else
@@ -1229,6 +1242,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 															bSkip = true;
 															if (count == 1)
 															{
+																bPrintedAnyMatStuff = true;
 																UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: %d"), *prefix, arrayPtr[0]);
 															}
 															/*
@@ -1257,16 +1271,19 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 														if (count == 1)
 														{
 															//UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: 0x%2x"), *prefix, arrayPtr[0]);
+															bPrintedAnyMatStuff = true;
 															UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: %#02x"), *prefix, arrayPtr[0]);
 														}
 														else if (count == 4)
 														{
 															static_assert(sizeof(uint32) == 4, "Uint32 not 4 bytes!");
 															//UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "%s: 0x%8x"), *prefix, ((const uint32*)arrayPtr)[0]);
+															bPrintedAnyMatStuff = true;
 															UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: 0x%#08x"), *prefix, ((const uint32*)arrayPtr)[0]);
 														}
 														else
 														{
+															bPrintedAnyMatStuff = true;
 															UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: %s"), *prefix, *bufferToString(prop->mData, prop->mDataLength));
 														}
 														/*
@@ -1292,6 +1309,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 													{
 														//TODO: if convert to string safely?
 														FString stringAsUEString = aiString2FString(*stringPtr);
+														bPrintedAnyMatStuff = true;
 														UE_LOG(LogTemp, Log, TEXT(LOG_INDENT "%s: '%s'"), *prefix, *stringAsUEString);
 														bSkip = true;
 													}
@@ -1332,11 +1350,13 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 															//ok = 
 															str = TEXT("null");
 														}
+														bPrintedAnyMatStuff = true;
 														UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "string: '%s'"), *str);
 													}
 													break;
 												case aiPTI_Buffer:
 													{
+														bPrintedAnyMatStuff = true;
 														//TODO: print hex string of byte dump
 														UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "[Buffer]: ptr=0x%x, len=%d"), prop->mData, prop->mDataLength);
 													}
@@ -1344,6 +1364,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 
 												default:
 													{
+														bPrintedAnyMatStuff = true;
 														UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Unandled type: %d, ptr=0x%x, len=%d"), prop->mType, prop->mData, prop->mDataLength);
 													}
 													break;
@@ -1353,7 +1374,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 								}
 							}//cleaner output
 							//}//end if verbose
-						} //if (UMeshLoader::debugMaterialInfo)
+						} //if (UEchoImporter::debugMaterialInfo)
 
 
 						FEchoImportMaterialData echoMat;
@@ -1417,6 +1438,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 														//NB: we can reach here of numElements is zero
 														//if ((numElements < 1)||(numElements >4))
 														{	
+															bPrintedAnyMatStuff = true;
 															UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Float param: unexpected count: %d [expected >= 1]"), numElements);
 														}
 													}
@@ -1431,6 +1453,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 														//if ((numElements < 1)||(numElements >4))
 														if (numElements >4)
 														{	
+															bPrintedAnyMatStuff = true;
 															UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Vector param: unexpected count: %d [expected 2-4]"), numElements);
 														}
 														//vector, pad with zero
@@ -1466,9 +1489,12 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 
 										default:
 											//types like strings and buffers cant just be passed through (or can they???)
-											UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Unhandled Property Type for %s : %d (%s)"), *propName.ToString(), prop->mType, *LookupMaterialPropertyTypeName(prop->mType));
-
-											UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "\t%s"), *propValueToStringWithType(prop));
+											if (!shouldIgnoreProperty(prop))
+											{
+												bPrintedAnyMatStuff = true;
+												UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Unhandled Property Type for %s : %d (%s)"), *propName.ToString(), prop->mType, *LookupMaterialPropertyTypeName(prop->mType));
+												UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "\t%s"), *propValueToStringWithType(prop));
+											}
 											/*
 											if (prop->mType == aiPTI_Buffer)
 											{
@@ -1513,7 +1539,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 							}
 						}
 
-						const bool verboseTextureInfo = UMeshLoader::importerVerbose;
+						const bool verboseTextureInfo = UEchoImporter::importerVerbose;
 						size_t texPairIndex = (size_t)-1;
 
 						//TODO: gltf importer from assimp always aliases some textures. ignore them if aliases present
@@ -1545,7 +1571,14 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 							const auto fSemantic = std::get<1>(texPair);
 							if (!foundIndexes.Contains(fIndex))
 						*/
-
+						/*
+						TSet<FString> usedTexturesOfKnownType;
+						for(const auto &texPair: foundTextures)
+						{
+							if (texP
+						}
+						*/
+						bool bExtraProcessingForTexturesArray = false;
 						for(const auto &texPair: foundTextures)
 						{
 							texPairIndex++;
@@ -1555,10 +1588,18 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 							const auto fIndex = std::get<0>(texPair);
 							const auto fSemantic = std::get<1>(texPair);
 							
+							//TODO: only warn or include if we dont have another place that its referenced
+							/*
 							if (fSemantic == aiTextureType_UNKNOWN)
 							{
 								UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Import WARNING: Unknown Texture Type!"));
 							}
+							*/
+							if (fSemantic == aiTextureType_UNKNOWN)
+							{
+								bExtraProcessingForTexturesArray = true;
+							}
+							
 							///texture index within material
 							//TODO: sort by tuple?
 							echoTex.TextureIndex = texPairIndex; //since textureIndex can apparently be repeated for different semantics, lets differentiate them. This is an arbitrary ordering.
@@ -1569,6 +1610,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 							if (verboseTextureInfo)
 							{
 								//UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "TEXTURE INFO: [%d] : %d"), fIndex, fSemantic);
+								bPrintedAnyMatStuff = true;
 								UE_LOG(LogTemp, Log, TEXT( LOG_INDENT "TEXTURE INFO: [%d] : %d (%s)"), fIndex, fSemantic, *LookupTextureTypeSemanticName(fSemantic));
 							}
 							for(unsigned int iMatProp=0; iMatProp < mat->mNumProperties; iMatProp++)
@@ -1583,6 +1625,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 										if (verboseTextureInfo)
 										{
 											//UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Prop[%d]: T_%d(T: %s) '%s' [%d] : S_%d(S: %s)"), 
+											bPrintedAnyMatStuff = true;
 											UE_LOG(LogTemp, Log, TEXT( LOG_INDENT "Prop[%d]: T_%d(T: %s) '%s' [%d]"), 
 												iMatProp, 
 												prop->mType, *LookupMaterialPropertyTypeName(prop->mType), 
@@ -1628,6 +1671,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 														{
 															//UE_LOG(LogTemp, Error, TEXT( LOG_INDENT ": String: %s"), *propKey);
 															//UE_LOG(LogTemp, Log, TEXT( LOG_INDENT ": String: '%s'"), *propValue);
+															bPrintedAnyMatStuff = true;
 															LOG_ERROR_OR_MESSAGE(bUnhandled, TEXT( LOG_INDENT ": String: '%s'"), *propValue);
 
 														}
@@ -1640,28 +1684,40 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 													bool bHandled = false;
 													if (propKey == kMapModeU)
 													{
-														if (prop->mData == nullptr)
+														if (prop->mData != nullptr)
 														{
-															bIgnore = true; //no effect
+															if (isEmptyString(prop->mData, prop->mDataLength))
+															{
+																//if (*prop->mData == L"0")
+																bIgnore = true; //no effect
+															}
 														}
 													}
 
 													if (propKey == kMapModeV)
 													{
-														if (prop->mData == nullptr)
+														if (prop->mData != nullptr)
 														{
-															bIgnore = true; //no effect
+															if (isEmptyString(prop->mData, prop->mDataLength))
+															{
+																bIgnore = true; //no effect
+															}
 														}
 													}
 
-													//if ((!bIgnore) && (!bHandled))
-													//if ()
-													bool bUnhandled = (!bIgnore) && (!bHandled);
+													if (shouldIgnoreProperty(prop))
+													{
+														bIgnore = true; //HACK
+													}
+
+													bool bUnhandled = !(bIgnore || bHandled);
+													if (bUnhandled)
 													{	
 														const FString UnhandledPrefix(TEXT("Unhandled Buffer value for"));
 														const FString BufferPrefix(TEXT("Buffer"));
 														const FString prefix = bUnhandled ? UnhandledPrefix : BufferPrefix;
 														//UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "%s prop %s: %s"), 
+														bPrintedAnyMatStuff = true;
 														LOG_ERROR_OR_MESSAGE(bUnhandled, 
 															TEXT( LOG_INDENT "%s prop %s: %s"), 
 															*prefix,
@@ -1691,18 +1747,22 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 															else
 															{
 																//Client CTA
+																bPrintedAnyMatStuff = true;
 																UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Texture mapped to uvw: %d. We only support textures on texcoord0 presently."), value0);
 															}
 														}
 														else
 														{
 															//unexpected
+															bPrintedAnyMatStuff = true;
 															UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "uvw mapping not a single value! count=%i"), count);
 														}
 													}
 
 													//if ((!bIgnore) && (!bHandled))
-													bool bUnhandled = (!bIgnore) && (!bHandled);
+													//bool bUnhandled = (!bIgnore) && (!bHandled);
+													bool bUnhandled = !(bIgnore || bHandled);
+													if (bUnhandled)
 													{
 														const FString UnhandledPrefix(TEXT("Unhandled Integer value for"));
 														const FString BufferPrefix(TEXT("in32"));
@@ -1724,11 +1784,12 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 															}
 															else
 															{
+																bPrintedAnyMatStuff = true;
 																UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Unhandled Int value for prop ERROR Count bad!")); 
 																intString = TEXT("<bad array>");
 															}
 														}
-
+														bPrintedAnyMatStuff = true;
 														LOG_ERROR_OR_MESSAGE(bUnhandled, TEXT( LOG_INDENT "%s prop %s: %s"), 
 																*prefix,
 																*aiString2FString(prop->mKey), *intString
@@ -1760,10 +1821,13 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 
 											default:
 												{
-													
-													UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Parsing Texture Definition: unhandled prop type for prop %s: %d (%s)"), 
-														*aiString2FString(prop->mKey), prop->mType, *LookupMaterialPropertyTypeName(prop->mType)
-													);
+													if (!shouldIgnoreProperty(prop))
+													{
+														bPrintedAnyMatStuff = true;
+														UE_LOG(LogTemp, Error, TEXT( LOG_INDENT "Parsing Texture Definition: unhandled prop type for prop %s: %d (%s)"), 
+															*aiString2FString(prop->mKey), prop->mType, *LookupMaterialPropertyTypeName(prop->mType)
+														);
+													}
 												}
 												break;
 										}//end switch
@@ -1773,6 +1837,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 								}//mat prop != null
 								else
 								{
+									bPrintedAnyMatStuff = true;
 									UE_LOG(LogTemp, Error, TEXT("MAT PROP[%d] is nullptr!"), iMatProp);
 								}
 								
@@ -1781,22 +1846,73 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 							echoMat.Textures.Push(echoTex);
 
 						}//for foundTextures
+
+						//TODO: don't duplicate per submaterial?
+						if (bExtraProcessingForTexturesArray)
+						{
+							//TSet<FString> usedTexturesOfKnownType;
+							TSet<FName> usedTexturesOfKnownType;
+							//for(const auto &texPair: foundTextures)
+							for(const auto &texInfo: echoMat.Textures)
+							{
+								if (texInfo.SemanticIndex != aiTextureType_UNKNOWN)
+								{
+									usedTexturesOfKnownType.Add(texInfo.TextureKey);
+								}
+							}
+						
+							//for(const auto &texInfo: echoMat.Textures)
+							TArray<FEchoImportMaterialTexture> cleanArray;
+							cleanArray.Reserve(echoMat.Textures.Num()); //might be an overcount but probably still faster if sane
+							int numSkipped = 0;
+							for(auto it=echoMat.Textures.begin(); it!=echoMat.Textures.end(); ++it)
+							{
+								const auto &texInfo = *it;
+								//if (fSemantic == aiTextureType_UNKNOWN)
+								if (texInfo.SemanticIndex == aiTextureType_UNKNOWN)
+								{
+									if (!usedTexturesOfKnownType.Contains(texInfo.TextureKey))
+									{
+										bPrintedAnyMatStuff = true;
+										UE_LOG(LogTemp, Error, TEXT(LOG_INDENT "Import WARNING: Unknown Texture Type!"));
+										//cleanArray.Push(
+									}
+									else
+									{
+										//it = echoMat.Textures.Remove(it);
+										numSkipped++;
+										continue; //skip - avoids adding it to cleanArray
+									}
+								}
+								cleanArray.Push(texInfo);
+							}
+							if (numSkipped > 0)
+							{
+								echoMat.Textures = cleanArray;
+							}
+						}
+
 						result.Materials.Push(echoMat);
 					} //if mat != nullptr
 					else
 					{
+						bPrintedAnyMatStuff = true;
 						UE_LOG(LogTemp, Error, TEXT("MAT[%d] is nullptr!"), iMat);
 					}
 				}//next material
 			}
 			else
 			{
+				bPrintedAnyMatStuff = true;
 				UE_LOG(LogTemp, Warning, TEXT("ImportModel: '%s': Importer: Scene has NO MATERIALS!"), *filenameLabel);
 			}
 
-		}//end debug materials
+			if (bPrintedAnyMatStuff)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("======================"));
+			}
 
-		UE_LOG(LogTemp, Warning, TEXT("======================"));
+		}//end debug materials
 		
 		{
 			if (Scene->HasTextures())
@@ -1822,7 +1938,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 						#define LOG_PRINT_TEXTURE_HEADER \
 							UE_LOG(LogTemp, Error, TEXT("\tTex[%d]: '%s': Hint<%s> [%i x %i]: 0x%x"), iTexture, *textureFilename, *formatHintFString, tex->mWidth, tex->mHeight, tex->pcData)
 
-						if (superVerbose || UMeshLoader::importerVerboseTextures)
+						if (superVerbose || UEchoImporter::importerVerboseTextures)
 						{
 							bPrintedTextureHeader = true;
 							LOG_PRINT_TEXTURE_HEADER;
@@ -1834,7 +1950,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 							//int width = 0;
 							//int height =0;
 							TArray<uint8> blob((uint8*)tex->pcData, tex->mWidth);
-							texImport.texture = UMeshLoader::LoadTexture2DFromBlob_Internal(textureFilename, blob, texImport.IsValid, texImport.Width, texImport.Height);
+							texImport.texture = UEchoImporter::LoadTexture2DFromBlob_Internal(textureFilename, blob, texImport.IsValid, texImport.Width, texImport.Height);
 							texImport.IsValid = texImport.IsValid && (texImport.texture != nullptr) && (texImport.Width>0) && (texImport.Height > 0);//sanity check
 							
 							if (!texImport.IsValid)
@@ -1941,7 +2057,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 		ProcessNode(filenameLabel, Scene->mRootNode, Scene, -1, NodeIndexPtr, &result);
 		result.Success = true;
 
-		if (UMeshLoader::debugImportedHierarchy)
+		if (UEchoImporter::debugImportedHierarchy)
 		{
 			UE_LOG(LogTemp, Error, TEXT("Parse Result: %s"), *filenameLabel);
 			size_t nodeI=(size_t)-1; //increment will get us to zero
@@ -1977,7 +2093,7 @@ bool FinishLoadMeshFromImporterAndScene(const FString &filenameLabel, Assimp::Im
 				}
 				//UE_LOG(LogTemp, Error, TEXT("\t\tParent: %d"), node.RelativeTransformTransform);
 			}
-		}//end if UMeshLoader::debugImportedHierarchy
+		}//end if UEchoImporter::debugImportedHierarchy
 		
 	}
 	return result.Success;
@@ -1990,7 +2106,7 @@ void ConfigureImporterCommon(Assimp::Importer &mImporter)
 		mImporter.SetExtraVerbose(true);
 		//mImporter.SetPropertyInteger(AI_CONFIG_PP_RVC_FLAGS, aiComponent_NORMALS); //HACK - strip normals
 		mImporter.SetPropertyInteger(AI_CONFIG_PP_RVC_FLAGS, aiComponent_NORMALS | aiComponent_TANGENTS_AND_BITANGENTS); //HACK - strip normals
-		mImporter.SetPropertyFloat(AI_CONFIG_PP_GSN_MAX_SMOOTHING_ANGLE,  UMeshLoader::smoothNormalsAngle);//80.0f); //?? apparently 175 is the default
+		mImporter.SetPropertyFloat(AI_CONFIG_PP_GSN_MAX_SMOOTHING_ANGLE,  UEchoImporter::smoothNormalsAngle);//80.0f); //?? apparently 175 is the default
 		//TODO: we might want to normally remove these??
 		//importer.SetPropertyInteger(AI_CONFIG_PP_RVC_FLAGS, aiComponent_CAMERAS | aiComponent_LIGHTS);
 		//aiComponent_NORMALS
@@ -2000,7 +2116,7 @@ void ConfigureImporterCommon(Assimp::Importer &mImporter)
 }
 
 //This function contains some code originally from RML
-FFinalReturnData UMeshLoader::LoadMeshFromFile(FString FilePath, EPathType type)
+FFinalReturnData UEchoImporter::LoadMeshFromFile(FString FilePath, EPathType type)
 {
     FFinalReturnData ReturnData;
 	ReturnData.Success = false;
@@ -2054,7 +2170,7 @@ static TArray<HintMappings> hintMappings = {
 #undef MAKE_HINT
 
 
-FFinalReturnData UMeshLoader::LoadMeshFromBlob(const FString &filenameInfo, const TArray<uint8> &blob)
+FFinalReturnData UEchoImporter::LoadMeshFromBlob(const FString &filenameInfo, const TArray<uint8> &blob)
 {
 	FFinalReturnData ReturnData;
 	ReturnData.Success = false;
@@ -2090,7 +2206,7 @@ FFinalReturnData UMeshLoader::LoadMeshFromBlob(const FString &filenameInfo, cons
 }
 
 //This function is based on a similar function from RML but supports a wider range of texture formats
-UTexture2D* UMeshLoader::LoadTexture2DFromBlob_Internal(const FString &filenameInfo, const TArray<uint8> &blob, bool& IsValid, int32& Width, int32& Height)
+UTexture2D* UEchoImporter::LoadTexture2DFromBlob_Internal(const FString &filenameInfo, const TArray<uint8> &blob, bool& IsValid, int32& Width, int32& Height)
 {
 	//possibly unneeded sanity check:
 	//TODO: lol maybe can parse files from just a filename? =)
@@ -2177,7 +2293,7 @@ UTexture2D* UMeshLoader::LoadTexture2DFromBlob_Internal(const FString &filenameI
 }
 
 //This is based on code from RML
-UTexture2D* UMeshLoader::LoadTexture2DFromFile(const FString& FullFilePath, bool& IsValid, int32& Width, int32& Height)
+UTexture2D* UEchoImporter::LoadTexture2DFromFile(const FString& FullFilePath, bool& IsValid, int32& Width, int32& Height)
 {
 	//Load From File
 	TArray<uint8> RawFileData;
@@ -2192,7 +2308,7 @@ UTexture2D* UMeshLoader::LoadTexture2DFromFile(const FString& FullFilePath, bool
     return LoadTexture2DFromBlob_Internal(FullFilePath, RawFileData, IsValid, Width, Height);
 }
 
-UTexture2D* UMeshLoader::LoadTexture2DFromBlob(const FString &filenameInfo, const TArray<uint8> &blob)
+UTexture2D* UEchoImporter::LoadTexture2DFromBlob(const FString &filenameInfo, const TArray<uint8> &blob)
 {
 	//bool& IsValid, int32& Width, int32& Height
 	bool bValid = false;
@@ -2207,7 +2323,7 @@ UTexture2D* UMeshLoader::LoadTexture2DFromBlob(const FString &filenameInfo, cons
 }
 
 
-void UMeshLoader::SetImporterSmoothingAngleForNormals(float setSmoothingAngle)
+void UEchoImporter::SetImporterSmoothingAngleForNormals(float setSmoothingAngle)
 {
 	//static void SetImporterSettingSmoothingAngleForNormals(float setSmoothingAngle)
 	const float MinSmoothingAngle = 0;
@@ -2228,5 +2344,23 @@ void UMeshLoader::SetImporterSmoothingAngleForNormals(float setSmoothingAngle)
 	smoothNormalsAngle = setSmoothingAngle;
 }
 
+void UEchoImporter::ResetState()
+{
+	hideDefaultUnwantedWarnings = true;
+	importerVerbose = false;
+	importerVerboseTextures = false;
+	debugVertexStreams = false;
+	debugImportedHierarchy = false;
+
+	debugMaterialInfo = false;
+
+	//WorkArounds:
+	stripNormals = false;
+
+	generateNormals = DefaultGenerateNormals;
+	generateSmoothNormals = DefaultGenerateSmoothNormals;
+	allowBadVertexColorDetectionAndOmission = DefaultVertexColorFix;
+	smoothNormalsAngle = DefaultSmoothNormalsAngle;
+}
 
 #pragma optimize( "", on )

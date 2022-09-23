@@ -255,7 +255,8 @@ enum class EPathType : uint8
  * Portions based on RML.
 **/
 UCLASS()
-class ECHO3DASSIMP_API UMeshLoader : public UBlueprintFunctionLibrary
+//class ECHO3DASSIMP_API UMeshLoader : public UBlueprintFunctionLibrary
+class ECHO3DASSIMP_API UEchoImporter : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 
@@ -271,6 +272,17 @@ public:
 	**/
 	UFUNCTION(BlueprintCallable,Category="EchoImport")
 	static FFinalReturnData LoadMeshFromBlob(const FString &filenameInfo, const TArray<uint8> &blob);
+
+	/**
+	 * hides/unhides a bunch of warnings that users probably want to ignore for now
+	 * 
+	 * default is True to make actual errors easier to spot
+	**/
+	static void SetHideDefaultUnwantedWarnings(bool setHideDefaultUnwantedWarnings)
+	{
+		//NOTE: meant to be invoked via UEchoMeshService so not blueprintcallable for now
+		hideDefaultUnwantedWarnings = setHideDefaultUnwantedWarnings;
+	}
 
 	/**
 	 * lots of import verbosity
@@ -363,10 +375,14 @@ public:
 	UFUNCTION(BlueprintCallable,Category="EchoImport")
 	static UTexture2D* LoadTexture2DFromBlob(const FString &filenameInfo, const TArray<uint8> &blob);
 
-
+	/**
+	 * meant for internal use to chain resets across various parts of the echo plugin 
+	**/
+	static void ResetState();
 
 ////////////////////////////////////////////////
 	//internal stuff don't use - not private since a bunch of random procedures need access, but that will probably eventually change when this is refactored
+	static bool hideDefaultUnwantedWarnings;
 	static bool importerVerbose;
 	static bool importerVerboseTextures;
 	static bool debugVertexStreams;
@@ -386,3 +402,5 @@ public:
 	**/
 	static UTexture2D* LoadTexture2DFromBlob_Internal(const FString &filenameInfo, const TArray<uint8> &blob, bool& IsValid, int32& Width, int32& Height);
 };
+
+//UMeshLoader : public UEchoImporter

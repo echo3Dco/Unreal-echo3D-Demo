@@ -1,5 +1,8 @@
 #pragma once
 
+/**
+ * some forward declarations mostly of stuff from EchoConnection.h
+**/
 //is this include actually sane?
 #include "Containers/ContainersFwd.h"
 //feels like overkill?:

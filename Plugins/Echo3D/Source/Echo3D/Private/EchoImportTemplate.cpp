@@ -4,6 +4,9 @@
 #include "EchoImportTemplate.h"
 #include "EchoMeshService.h"
 #include "Echo3DService.h"
+
+#include "EchoMemorySubsystem.h"
+
 //hack to ensure cast is sane to compiler
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -142,7 +145,7 @@ UMaterialInterface *UEchoMaterialBaseTemplate::EvalMaterial_Implementation(
 	//return UEchoMeshService::ParseOneMaterialDefault(WorldContextObject, thisConfig, actorConfig, importedData, forMaterial, forMeshVariant, this->GetDefaultMaterialMaster());
 	//return UEchoMeshService::ParseOneMaterialDefault(WorldContextObject, thisConfig, actorConfig, importedData, forMaterial, forMeshVariant, this->GetDefaultMaterialMaster());
 	return UEchoMeshService::ParseOneMaterialDefault(
-		importConfig.WorldContextObject, 
+		importConfig.WorldContextObject.Get(), 
 		importConfig.importTitle,
 		//actorConfig, 
 		importedData, forMaterial, forMeshVariant, this->GetDefaultMaterialMaster()
@@ -154,33 +157,56 @@ UMaterialInterface *UEchoMaterialBaseTemplate::EvalMaterial_Implementation(
 
 
 void UEchoHologramAssetTemplate::ExecTemplate_Implementation(
-		UPARAM(ref) FEchoImportConfig &thisConfig
+		UPARAM(ref) FEchoImportConfig &importConfig
 		//UObject *WorldContextObject,
 		//const FEchoConnection &connection, 
 		//UObject *useExisting, UClass *constructClass
 	) const
 {
 	TArray<FEchoAssetRequest> requests;
-	GenerateAssetRequests(thisConfig, requests);
+	GenerateAssetRequests(importConfig, requests);
 	if (requests.Num() < 1)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("UEchoHologramAssetTemplate::ExecTemplate: zero assets requested for %s"), *this->GetTemplateDebugString());
 	}
 	
+	if (importConfig.IsStale())
+	{
+		UE_LOG(LogTemp, Error, TEXT("UEchoHologramAssetTemplate::ExecTemplate: WCO appears to be stale. abandoning construction"));
+		return;
+	}
+	UObject *usingWCO = importConfig.WorldContextObject.Get();
+	//if (!importConfig.IsValidWCO())
+	if (usingWCO == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("UEchoHologramAssetTemplate::ExecTemplate: WCO appears to be null. abandoning construction"));
+		return;
+	}
+
 	//local copy of state
 	FString debugStringCopy = this->GetTemplateDebugString(); //capture here for possible later debug usage - TODO: maybe only do this in some debug mode(s)?
 	TWeakObjectPtr<const UEchoHologramAssetTemplate> thisWeak = this;
-	FEchoImportConfig thisConfigCopy = thisConfig;
+	FEchoImportConfig importConfigCopy = importConfig;
 	
 	//TSharedRef<FEchoMemoryAssetCallback> delgateFunc= MakeShared<FEchoMemoryAssetCallback>();
 	FEchoMemoryAssetArrayCallback delegateFunc;
-	//delegateFunc.BindLambda([thisWeak, thisConfigCopy, debugStringCopy](const TArray<const FEchoMemoryAsset> &assets)
-	delegateFunc.BindLambda([thisWeak, thisConfigCopy, debugStringCopy](const TArray<FEchoMemoryAsset> &assets)
+	//delegateFunc.BindLambda([thisWeak, importConfigCopy, debugStringCopy](const TArray<const FEchoMemoryAsset> &assets)
+
+	//FEchoMemoryGuard guardTemplate = UEchoMemorySubsystem::CreateGuard(importConfig.WorldContextObject, this);
+	//TODO: provide a weakObjectPtr getter wrapper for ease of use?
+	FEchoMemoryGuard guardTemplate(usingWCO, this);
+	
+	delegateFunc.BindLambda([thisWeak, importConfigCopy, debugStringCopy, guardTemplate](const TArray<FEchoMemoryAsset> &assets)
 		{
+			if (guardTemplate.IsStale())
+			{
+				UE_LOG(LogTemp, Error, TEXT("UEchoHologramAssetTemplate::ExecTemplate::(lambda): after assets retrieved, our guard is no longer valid"));
+				return;
+			}
 			//we've resolved the assets.
 			if (thisWeak.IsStale())
 			{
-				UE_LOG(LogTemp, Error, TEXT("UEchoHologramAssetTemplate::ExecTemplate: after assets retrieved, 'this' has been destroyed in %s"), *debugStringCopy);
+				UE_LOG(LogTemp, Error, TEXT("UEchoHologramAssetTemplate::ExecTemplate::(lambda): after assets retrieved, 'this' has been destroyed in %s"), *debugStringCopy);
 				return;
 			}
 			const UEchoHologramAssetTemplate *thisTemplate = thisWeak.Get();
@@ -191,14 +217,30 @@ void UEchoHologramAssetTemplate::ExecTemplate_Implementation(
 				return;
 			}
 			//TODO: should we do anything to handle assets we failed to get?
-			//TODO: do i need to capture another copy of thisConfigCopy here?
-			thisTemplate->ExecWithAssets(thisConfigCopy, assets);
+			//TODO: do i need to capture another copy of importConfigCopy here?
+			thisTemplate->ExecWithAssets(importConfigCopy, assets);
 		}
 	);
 
-	AEcho3DService::RequestAssets(thisConfigCopy.connection, requests, delegateFunc);
+	AEcho3DService::RequestAssets(importConfigCopy.connection, requests, delegateFunc);
 }
 
+/*
+//meh we should provide base class stuffs in init with blueprints
+UEchoHologramActorTemplate::UEchoHologramActorTemplate()
+{
+	//or manage an instance??
+	//this->materialTemplateClass = UEchoMaterialTemplate::StaticClass();
+}
+
+UEchoMaterialTemplate::UEchoMaterialTemplate()
+{
+	//this->defaultMaterial = 
+	//static ConstructorHelpers::FObjectFinder<UMaterial> MaterialRef(TEXT("/Plugin"));
+	//UStaticMesh* StaticMesh = MeshRef.Object;
+	//check(StaticMesh != nullptr);
+}
+*/
 
 void UEchoHologramActorTemplate::GenerateAssetRequests_Implementation(
 		const FEchoImportConfig &importConfig,
@@ -236,7 +278,7 @@ void UEchoHologramActorTemplate::ExecWithAssets_Implementation(
 	AActor *useActor = nullptr;
 	//useActor = weakUseExistingAsActor.Get();
 	useActor = this->GetUseExistingActor();
-		
+	
 	//FEchoImportConfig userConfigCopyInner = userConfigCopy;
 	//FEchoImportConfig userConfigCopyInner = userConfigCopy;
 	FEchoConstructActorResult constructionResult;
@@ -297,8 +339,8 @@ void UEchoHologramActorTemplate::ExecWithAssets_Implementation(
 		UE_LOG(LogTemp, Error, TEXT("GetImportSettings: failed to get valid import settings! importing: %s"), *importConfig.importTitle);
 		meshConfig.meshImportSettings = FEchoCustomMeshImportSettings(); //UEchoMeshService::SetDefaultMeshImportSettings();
 	}
-	meshConfig.spawnClass = nullptr; //????
-	UE_LOG(LogTemp, Error, TEXT("TODO: figure out how spawnClass was used in meshloader again"));
+	//meshConfig.spawnClass = nullptr; //????
+	//UE_LOG(LogTemp, Error, TEXT("TODO: figure out how spawnClass was used in meshloader again"));
 
 	UEchoMeshService::AttachMeshFromAssetArray(importConfig, meshConfig, assets);
 	//useActor, connectionCopy, assets, nullptr, userConfigCopyInner, actorResolutionsBase);

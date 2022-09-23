@@ -6,13 +6,15 @@
 #include "GameFramework/Actor.h"
 #include "EchoBaseActor.generated.h"
 
+/**
+ * mostly just an actor, but with some easily inspectable properties for in-editor debugging. 
+**/
 UCLASS()
 class ECHO3D_API AEchoBaseActor : public AActor
 {
 	GENERATED_BODY()
 	
 public:	
-	// Sets default values for this actor's properties
 	AEchoBaseActor();
 
 protected:
@@ -23,8 +25,6 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	//underscore so it renders at the start of the frame:
-
 	UPROPERTY(EditAnywhere, Category = "Echo3D|_Source")
 	FString hologramId;
 
@@ -34,40 +34,24 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Echo3D|_Source")
 	FString storageId;
 
-	//FEchoImportConfig importConfig;//unsafe
+	//TODO: return to an importInfo now that it shouldn't crash use?
 	UPROPERTY(EditAnywhere, Category = "Echo3D|_Source|ImportConfig")
 	FEchoHologramInfo hologram;
-	
+
 	UPROPERTY(EditAnywhere, Category = "Echo3D|_Source|ImportConfig")
 	FString importTitle;
 
-	//this crashes and burns us
 	UPROPERTY(EditAnywhere, Category = "Echo3D|_Source|ImportConfig")
 	const UEchoHologramBaseTemplate *hologramTemplate;
-	//TWeakObjectPtr<const UEchoHologramBaseTemplate> hologramTemplate;
-
+	
 	UPROPERTY(EditAnywhere, Category = "Echo3D|_Source|MeshConfig")
 	FEchoCustomMeshImportSettings importSettings;
 
-
-
+	//NB: if these are not declared as USceneComponent then Unreal Editor crashes and burns if you try to edit the transform in the details window for one of these
 	UPROPERTY(EditAnywhere, Category = "Echo3D|Inspector")
 	TArray<USceneComponent*> InspectableComponents;
 	
 	UPROPERTY(EditAnywhere, Category = "Echo3D|Inspector|Verbose")
 	TArray<UTexture2D*> InspectableTextures;
-	
-
-	//TODO: try making an inspectable tree setup for inspection??
-
-	//UPROPERTY(VisibleAnywhere, Category = "Echo3D|Inspector")
-	//HACK - editing transform causes crashes
-	//TArray<UActorComponent*> InspectableComponents;
-	
-
-	//UPROPERTY(EditAnywhere, Category = "Echo3D|Inspector")
-	//UActorComponent *HardReferenceHack;
-
-	
 
 };

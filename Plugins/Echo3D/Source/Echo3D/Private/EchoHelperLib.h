@@ -6,17 +6,13 @@
 
 //need our "public" types
 #include "EchoStructsFwd.h"
-//#include "EchoConnection.h"
-
-#include "EchoStringConstants.h"
-//EchoHelperLib
-
 //TODO: rename to EchoHelperUtil?
 
-/*
-class EchoHelperLib
-*/
+#include "EchoStringConstants.h"
 
+/**
+ * some non-public helper functionality.
+**/
 //this will look like a "class"
 namespace EchoHelperLib
 {	

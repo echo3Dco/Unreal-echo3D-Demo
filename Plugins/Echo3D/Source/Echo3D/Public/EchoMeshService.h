@@ -6,15 +6,11 @@
 #include "EchoConnection.h"
 #include "Materials/Material.h"
 
-//#include "EchoImporter.h"
-
 #include "EchoMeshService.generated.h"
 
 //from echoimporter
 typedef struct FFinalReturnData;
 typedef struct FEchoImportMaterialData;
-
-//const UEchoMaterialBaseTemplate *templateForMaterials
 
 /**
  * The factory for meshes and other 3D content/assets.
@@ -32,70 +28,38 @@ public:
 	**/
 	static const int32 MeshVariantFormatVersion_01 = 1; 
 
+	//TODO: accept an echoconnection instead of an import config??
 	/**
 	 * Attaches a mesh later on (async) from the specified echo3d storage content.
 	**/
 	UFUNCTION(BlueprintCallable, Category = "EchoMesh")
-	//static void AttachMeshFromStorage(AActor *actor, const FEchoConnection &connection, const FString &storageId, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig);
-	//TODO: accept an echoconnection instead of an import config??
 	static void AttachMeshFromStorage(
 		const FEchoImportConfig &importConfig, 
 		const FEchoImportMeshConfig &meshConfig,
 		const FString &storageId
 	);
 
-	/*
-		//AActor *actor, const FEchoConnection &connection, const FString &storageId, UClass *spawnClass, 
-		AActor *actor, const FString &storageId,
-		UClass *spawnClass,  //Do we still want this?
-		const FEchoImportConfig &importConfig
-		//, const FEchoActorTemplateResolution &actorConfig
-	);
-	*/
-
 	/**
 	 * Attaches a mesh given an asset. 
 	 * we might actually want to pass the asset list/map around too?
 	 * This is generally expected to (but not required to) complete immediately unless some additional assets must be downloaded.
 	**/
-	//UFUNCTION(BlueprintCallable, Category = "EchoMesh", DisplayName="AttachMeshFromAsset")
 	UFUNCTION(BlueprintCallable, Category = "EchoMesh")
 	static void AttachMeshFromAsset(
 		const FEchoImportConfig &importConfig, 
 		const FEchoImportMeshConfig &meshConfig,
-		//const FEchoImportMaterialConfig &matConfig,
 		const FEchoMemoryAsset &asset
 	);
-		
-		//const FEchoCustomMeshImportSettings &applyMeshImportSettings, 
-		//AActor *actor, 
-		//const FEchoConnection &connection, 
-		//UClass *spawnClass
-		//, const FEchoActorTemplateResolution &actorConfig
-	//);
 
-	//TODO: Should this even be public? its unclear from the name how its different from just AttachMeshFromAsset
 	/**
 	 * Assemble 3d content from already downloaded assets. 
 	 * TODO: maybe per-mesh asset run attachmesh??
 	**/
-	//static void Assemble(AActor *actor, const FEchoConnection &connection, const FEchoMemoryAssetArray &assets, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig);
 	UFUNCTION(BlueprintCallable, Category = "EchoMesh")
 	static void AttachMeshFromAssetArray(
 		const FEchoImportConfig &importConfig, 
 		const FEchoImportMeshConfig &meshConfig,
-		//const TArray<const FEchoMemoryAsset> &assetList
 		const TArray<FEchoMemoryAsset> &assetList
-		/*
-		const FEchoCustomMeshImportSettings *applyMeshImportSettings, 
-		const FEchoImportConfig &config, 
-		const TArray<const FEchoMemoryAsset> &assetList, 
-		AActor *actor, 
-		//const FEchoConnection &connection, 
-		
-		UClass *spawnClass
-		*/
-		//AActor *actor, const FEchoConnection &connection, const FEchoMemoryAssetArray &assets, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig
 	);
 
 	/**
@@ -112,9 +76,7 @@ public:
 	**/
 	static UMaterialInstanceDynamic *ParseOneMaterialDefault(
 		UObject *WorldContextObject,
-		//const FEchoImportConfig &importConfig, 
 		const FString &importTitle, 
-		//const FEchoActorTemplateResolution &actorConfig,
 		const FFinalReturnData & materialResults, 
 		const FEchoImportMaterialData &forMaterial,
 		const FEchoMeshVariants &forMeshVariant,
@@ -138,9 +100,14 @@ public:
 	 * if true, will print verbose information when setting up a material for debugging purposes
 	**/
 	UFUNCTION(BlueprintCallable, Category = "EchoMesh|Debug")
-	static void SetMeshImporterDebugPrintMaterialInfo(bool setDebugPrintMaterialInfo)
+	static void SetMeshServiceDebugPrintMaterialInfo(bool setDebugPrintMaterialInfo)
 	{
 		debugPrintMaterialInfo = setDebugPrintMaterialInfo;
+	}
+
+	static bool GetMeshServiceDebugPrintMaterialInfo()
+	{
+		return debugPrintMaterialInfo;
 	}
 
 	/**
@@ -153,25 +120,15 @@ public:
 	 * DEBUG: loads a mesh from a file. this is mostly meant as a debugging tool
 	**/
 	UFUNCTION(BlueprintCallable, Category = "EchoMesh")
-	//static bool DebugLoadMeshFromFile(AActor *actor, const FString &localFilename, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig)
 	static bool DebugLoadMeshFromFile(
 		const FEchoImportConfig &importConfig, 
 		const FEchoImportMeshConfig &meshConfig,
 		const FString &localFilename
-		//const FEchoCustomMeshImportSettings &applyMeshImportSettings, 
-		//const UEchoMaterialTemplate *materialTemplate,
-		//AActor *actor, 
-		//UClass *spawnClass
-		
-		//const FEchoImportConfig &config, 
-		//AActor *actor, const FString &localFilename, UClass *spawnClass
-		//, const FEchoActorTemplateResolution &actorConfig
 	)
 	{
 		FEchoMemoryAsset asset;
 		asset.bHaveContent = false;
 		asset.assetType = EEchoAssetType::EEchoAsset_Unknown;
-		//bool ok = DebugLoadAssetFromFile(localFilename, EEchoAssetType::EEchoAsset_Mesh, asset, config);
 		bool ok = DebugLoadAssetFromFile(localFilename, EEchoAssetType::EEchoAsset_Mesh, asset);
 		if (!ok)
 		{
@@ -179,10 +136,7 @@ public:
 			//TODO: should we be returning some kind of UMeshComponent?
 			return false;
 		}
-		//AttachMeshFromAsset(actor, FEchoConnection(), asset, spawnClass, nullptr, config, actorConfig);
-		//AttachMeshFromAsset(importConfig, asset, applyMeshSettings, materialTemplate, actor, spawnClass);
-		AttachMeshFromAsset(importConfig, meshConfig, asset);//, applyMeshSettings, materialTemplate, actor, spawnClass);
-		//actor, FEchoConnection(), asset, spawnClass, nullptr, config, actorConfig);
+		AttachMeshFromAsset(importConfig, meshConfig, asset);
 		return true;
 	}
 
@@ -192,44 +146,41 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "EchoMesh")
 	static bool DebugLoadAssetFromFile(const FString &localFilename, EEchoAssetType assetType, FEchoMemoryAsset &result);
 
-protected:
-	/////various blueprint specific variations that are protected to "hide" them from C++ users since they're just wrappers for blueprint
-	
 	/**
-	 * Attaches a mesh given an asset. 
-	 * we might actually want to pass the asset list/map around too?
-	 * This is generally expected to (but not required to) complete immediately unless some additional assets must be downloaded.
+	 * turns on/off hiding for a bunch of warnings that we probably dont care about like unhandled duplicate properties etc.
+	 * default is on.
 	 * 
-	 * This is a blueprint wrapper for the C++ version which
-	 * 
-	 * @param connection: because might concievably need additional assets
+	 * This is mostly to keep things intelligible by default and make actual errors more obvious. call with true if your not seeing an import property and want to see if errors about it are being hidden etc
+	 * meant to be invoked via Echo3DService's same-name method
 	**/
-	
-	/*
-	UFUNCTION(BlueprintCallable, Category = "EchoMesh", DisplayName="AttachMeshFromAsset")
-	//static void AttachMeshFromAsset_BP(AActor *actor, const FEchoConnection &connection, const FEchoMemoryAsset &asset, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig)
-	static void AttachMeshFromAsset_BP(
-		const FEchoImportConfig &config, 
-		const FEchoMemoryAsset &asset, 
-		const FEchoCustomMeshImportSettings &importSettings,
-		AActor *actor, UClass *spawnClass
-		//, const FEchoActorTemplateResolution &actorConfig
-	)
-	{
-		//AttachMeshFromAsset(actor, connection, asset, spawnClass, nullptr, config, actorConfig);
-		//AttachMeshFromAsset(config, asset, asset, spawnClass, nullptr, config, actorConfig);
-		AttachMeshFromAsset(config, asset, asset, spawnClass, nullptr, config, actorConfig);
-	}
-	*/
-	/*
-	//does this variation need to exist? - no we can easily remake it later though!
 	UFUNCTION(BlueprintCallable, Category = "EchoMesh")
-	static void AttachMeshFromAsset_BPCustomSettings(AActor *actor, const FEchoConnection &connection, const FEchoMemoryAsset &asset, UClass *spawnClass, const FEchoCustomMeshImportSettings &applyMeshImportSettings, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig)
+	static void SetHideDefaultUnwantedWarnings(bool setHideDefaultUnwantedWarnings);
+	
+	/** gets the current state of hiding unwanted warnings. **/
+	UFUNCTION(BlueprintCallable, Category = "EchoMesh")
+	static bool GetHideDefaultUnwantedWarnings()
 	{
-		AttachMeshFromAsset(actor, connection, asset, spawnClass, &applyMeshImportSettings, config, actorConfig);
+		return hideDefaultUnwantedWarnings;
 	}
-	*/
 
+	//deprecated
+	/**
+	 * gets the default material master. deprecated since we want to move towards templates and it was not really that easy to resuse material masters without some custom glue code to configure them
+	**/
+	static UMaterial *GetDefaultMaterial()
+	{
+		return defaultMaterial.Get();
+	}
+
+	/**
+	 * meant to be called by Echo3DService to chain resetting in init sequence
+	 * NOT exposed to blueprint presently - this should be being called internally for now
+	**/
+	static void ResetState();
+		
+//END PUBLIC
+protected:
+	
 	/**
 	 * Temporary workaround for not yet supporting texture loading. Might add something like this later on for side channel injection of textures though.
 	**/
@@ -238,6 +189,7 @@ protected:
 	{
 		BindDebugTexture(texName, setTexture);
 	}
+//END PROTECTED
 
 private:
 	//State
@@ -245,4 +197,5 @@ private:
 	static FEchoCustomMeshImportSettings defaultMeshSettings;
 	static TMap<FName, TWeakObjectPtr<UTexture2D>> debugTextureBindings;
 	static bool debugPrintMaterialInfo;
+	static bool hideDefaultUnwantedWarnings;
 };

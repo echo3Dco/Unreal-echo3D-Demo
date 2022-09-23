@@ -1,11 +1,14 @@
 #pragma once
 #include "Containers/UnrealString.h"
-
+//TODO: does this really want ECHO3D_API?
+/**
+ * some string constants used practically everywhere
+**/
 struct ECHO3D_API EchoStringConstants
 {
 	//GENERATED_BODY()
 public:
-	//static const FString EmptyFString; //deprecated
+	/** an empty string**/
 	static const FString EmptyString;
 
 	/**
@@ -18,13 +21,17 @@ public:
 	**/
 	static const FString BadStringValue; 
 
+	/** constant for true boolean **/
 	static const FString TrueText;
+
+	/** constant for false boolean **/
 	static const FString FalseText;
 
+	//keys for simplevec3 names
 	static const FString DefaultXKey;
 	static const FString DefaultYKey;
 	static const FString DefaultZKey;
 
-	//static const TArray<FString> EmptyFStringArray;//deprecated
+	/** readonly zero-length array of strings used as a placeholder for entries/tags**/
 	static const TArray<FString> EmptyStringArray;
 };

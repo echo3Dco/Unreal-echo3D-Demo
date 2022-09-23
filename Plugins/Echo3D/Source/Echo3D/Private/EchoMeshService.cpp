@@ -104,6 +104,49 @@ struct FEchoParsedMaterials
 
 
 
+namespace EchoMeshServiceInternal
+{
+	//TODO: bind shading models to different default material templates??
+	//TODO: probably ignore for defaults and certain cases
+	//const TMap<FString, bool> ignorePropsDictionary = {
+	const TMap<FName, bool> ignorePropsDictionary = {
+		{ TEXT("$mat.shininess"), true },
+		{ TEXT("$mat.opacity"), true }, 
+		{ TEXT("$mat.gltf.alphaCutoff"), true }, 
+		{ TEXT("$clr.base"), true }, 
+	};
+	/*
+	
+	LogTemp: Error: UNKNOWN (To Importer) Texture Type: 18
+	LogTemp: Error: Unhandled Scalar Name: $mat.shininess
+	LogTemp: Error: Unhandled Scalar Name: $mat.opacity
+	LogTemp: Error: Unhandled Scalar Name: $mat.gltf.alphaCutoff
+	LogTemp: Error: Unhandled Vector Name: $clr.base
+	*/
+
+	//bool shouldIgnoreProperty(const FString &propName)
+	bool shouldIgnoreProperty(const FName &propName)
+	{
+		if (!UEchoMeshService::GetHideDefaultUnwantedWarnings())
+		{
+			return false;
+		}
+		/*if (prop == nullptr)
+		{
+			return false; //something went wrong if asking about nullptr
+		}*/
+		//FString propName = aiString2FString(prop->mKey);
+		//if (ignorePropsDictionary.find(propName) != ignorePropsDictionary.end())
+		if (ignorePropsDictionary.Contains(propName))// != ignorePropsDictionary.end())
+		{
+			return true;
+		}
+		return false;
+	}
+};
+using namespace EchoMeshServiceInternal;
+
+
 USceneComponent *CreateTransformComponent(USceneComponent *outer)
 {
 	return NewObject<USceneComponent>(outer);
@@ -320,9 +363,12 @@ void CreateMeshNodeHelper2(const FString &meshLabel, EchoMeshhResultNode &result
 				bool bHaveVertColors = (useColors.Num() > 0);
 				matInterface = bHaveVertColors ? usingMatGroup->matVertexColors : usingMatGroup->baseMat;
 				//TODO: should we fall back to non-vertex color case and retry?
-				if (matInterface == nullptr)
+				if (UEchoMeshService::GetMeshServiceDebugPrintMaterialInfo())
 				{
-					UE_LOG(LogTemp, Error, TEXT("mat interface null! which: [%d][vertexColors? %s]"), whichMaterial, *StringUtil::BoolToString(bHaveVertColors));
+					if (matInterface == nullptr)
+					{
+						UE_LOG(LogTemp, Error, TEXT("mat interface null! which: [%d][vertexColors? %s]"), whichMaterial, *StringUtil::BoolToString(bHaveVertColors));
+					}
 				}
 				meshComp->SetMaterial(0, matInterface);
 			}
@@ -456,10 +502,44 @@ bool ParseAllMaterials(
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("MeshFile: %s: Found: %d materials from importer"), *importConfig.importTitle, importedData.Materials.Num());
+		if (UEchoMeshService::GetMeshServiceDebugPrintMaterialInfo())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("MeshFile: %s: Found: %d materials from importer"), *importConfig.importTitle, importedData.Materials.Num());
+		}
+		
+		
+		bool bIgnoreMissingMatWarnings = false;
+		{
+			//temporary check while this is not per instance for less spam:
+			const UEchoMaterialBaseTemplate *templateForMaterials = meshConfig.materialTemplate;
+			if (templateForMaterials == nullptr)
+			{
+				if (UEchoMeshService::GetDefaultMaterial() == nullptr)
+				{
+				
+				
+					if (importConfig.hologramTemplate == nullptr)
+					{
+						bIgnoreMissingMatWarnings = true;
+						UE_LOG(LogTemp, Error, TEXT("No hologram template and no default material found importing %s"), *importConfig.importTitle);
+					}
+					else
+					{
+						//TODO: this subcase will eventually be nuked and handled in the for loop
+						bIgnoreMissingMatWarnings = true;
+						FString hologramTemplateName = (importConfig.hologramTemplate != nullptr) ? importConfig.hologramTemplate->GetTemplateDebugString() : EchoStringConstants::NullString;
+						//UE_LOG(LogTemp, Error, TEXT("No material template and no default material found importing %s with template %s, meshMaterial: %s"), *importConfig.importTitle, *hologramTemplateName, *matDef.MaterialName.ToString());
+						UE_LOG(LogTemp, Error, TEXT("No material template and no default material found importing %s with template %s"), *importConfig.importTitle, *hologramTemplateName);
+					}
+				}
+			}
+		}
 
+		const bool bIgnoreMissingMatWarningsOuter = bIgnoreMissingMatWarnings; //capture before start of for loop
 		for(auto &matDef: importedData.Materials)
 		{
+			//bool bIgnoreMissingMatWarnings = false;
+			
 			FEchoOneMaterial oneMat;
 			oneMat.baseMat = nullptr;
 			oneMat.matVertexColors = nullptr;
@@ -477,8 +557,13 @@ bool ParseAllMaterials(
 			{
 				
 			}*/
-
 			//if (actorConfig.hologramTemplate != nullptr)
+			bool bIgnoreMissingMatWarningsThisTime = bIgnoreMissingMatWarningsOuter;
+			UObject *usingWCO = importConfig.WorldContextObject.Get();
+			if (importConfig.IsStale() || (usingWCO == nullptr))
+			{
+				UE_LOG(LogTemp, Error, TEXT("WCO is null or stale"));
+			}
 			if (templateForMaterials != nullptr)
 			{
 				oneMat.baseMat = templateForMaterials->EvalMaterial(importConfig, meshConfig, importedData, matDef, varDefaultVariant);
@@ -495,26 +580,57 @@ bool ParseAllMaterials(
 					UE_LOG(LogTemp, Error, TEXT("hologram template was stale: importing '%s' : mat '%s'"), *importConfig.importTitle, *matDef.MaterialName.ToString());
 				}
 				*/
-				oneMat.baseMat = UEchoMeshService::ParseOneMaterialDefault(importConfig.WorldContextObject, importConfig.importTitle, importedData, matDef, varDefaultVariant);
-				oneMat.matVertexColors = UEchoMeshService::ParseOneMaterialDefault(importConfig.WorldContextObject, importConfig.importTitle, importedData, matDef, varVertexColors);
 
+				//note: materialtemplate might not be a constant per iteration later on
+				if (UEchoMeshService::GetDefaultMaterial() == nullptr)
+				{
+					if (!bIgnoreMissingMatWarnings)
+					{
+						FString hologramTemplateName = (importConfig.hologramTemplate != nullptr) ? importConfig.hologramTemplate->GetTemplateDebugString() : EchoStringConstants::NullString;
+						UE_LOG(LogTemp, Error, TEXT("No material template and no default material found importing %s with template %s, meshMaterial: %s"), *importConfig.importTitle, *hologramTemplateName, *matDef.MaterialName.ToString());
+					}
+					oneMat.baseMat = nullptr;
+					oneMat.matVertexColors = nullptr;
+					bIgnoreMissingMatWarnings = true;//consolidating errors
+					bIgnoreMissingMatWarningsThisTime = true;
+				}
+				else
+				{
+					oneMat.baseMat = UEchoMeshService::ParseOneMaterialDefault(usingWCO, importConfig.importTitle, importedData, matDef, varDefaultVariant);
+					oneMat.matVertexColors = UEchoMeshService::ParseOneMaterialDefault(usingWCO, importConfig.importTitle, importedData, matDef, varVertexColors);
+				}
 				//oneMat.baseMat = UEchoMeshService::ParseOneMaterialDefault(owner, importConfig, actorConfig, importedData, matDef, varDefaultVariant);
 				//oneMat.matVertexColors = UEchoMeshService::ParseOneMaterialDefault(owner, importConfig, actorConfig, importedData, matDef, varVertexColors);
 			}
 			//TODO: warn if any variation is nullptr???
 
+			//TODO: make these only ignored for global ignore or per this specific mat
 			if (oneMat.baseMat == nullptr)
 			{
-				//UE_LOG(LogTemp, Error, TEXT("baseMat result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(actorConfig.hologramTemplate != nullptr));
-				//UE_LOG(LogTemp, Error, TEXT("baseMat result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(hologramTemplate != nullptr));
-				//UE_LOG(LogTemp, Error, TEXT("baseMat result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(hologramTemplate != nullptr));
-				UE_LOG(LogTemp, Error, TEXT("baseMat result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s, matTemplate: %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(importConfig.hologramTemplate != nullptr), *((meshConfig.materialTemplate != nullptr) ? meshConfig.materialTemplate->GetTemplateName() : EchoStringConstants::NullString));
+				if (!bIgnoreMissingMatWarningsThisTime)
+				{
+					//UE_LOG(LogTemp, Error, TEXT("baseMat result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s, matTemplate: %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(importConfig.hologramTemplate != nullptr), *((meshConfig.materialTemplate != nullptr) ? meshConfig.materialTemplate->GetTemplateName() : EchoStringConstants::NullString));
+					UE_LOG(LogTemp, Error, TEXT("baseMat result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s, matTemplate: %s"), 
+						*importConfig.importTitle, 
+						*StringUtil::BoolToString(importConfig.hologramTemplate != nullptr), 
+						*((meshConfig.materialTemplate != nullptr) ? meshConfig.materialTemplate->GetTemplateName() : EchoStringConstants::NullString),
+						*matDef.MaterialName.ToString()	
+					);
+				}
 				allOk = false;
 			}
 			if (oneMat.matVertexColors == nullptr)
 			{
-				//UE_LOG(LogTemp, Error, TEXT("matVertexColors result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(actorConfig.hologramTemplate != nullptr));
-				UE_LOG(LogTemp, Error, TEXT("matVertexColors result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s, matTemplate: %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(importConfig.hologramTemplate != nullptr), *((meshConfig.materialTemplate != nullptr) ? meshConfig.materialTemplate->GetTemplateName() : EchoStringConstants::NullString));
+				if (!bIgnoreMissingMatWarningsThisTime)
+				{
+					//UE_LOG(LogTemp, Error, TEXT("matVertexColors result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s"), *importConfig.importTitle, *matDef.MaterialName.ToString(), *StringUtil::BoolToString(actorConfig.hologramTemplate != nullptr));
+					UE_LOG(LogTemp, Error, TEXT("matVertexColors result was nullptr: importing '%s' : mat '%s' : hasTemplate? %s, matTemplate: %s"), 
+						*importConfig.importTitle, 
+						*StringUtil::BoolToString(importConfig.hologramTemplate != nullptr), 
+						*((meshConfig.materialTemplate != nullptr) ? meshConfig.materialTemplate->GetTemplateName() : EchoStringConstants::NullString),
+						*matDef.MaterialName.ToString()	
+					);
+				}
 				allOk = false;
 			}
 
@@ -642,7 +758,7 @@ void UEchoMeshService::AttachMeshFromAsset(
 	///////////////////////////////////////////////////////////////////////
 	// Evauluate with AssImp
 
-	FFinalReturnData data = UMeshLoader::LoadMeshFromBlob(asset.fileInfo.filename, asset.blob);
+	FFinalReturnData data = UEchoImporter::LoadMeshFromBlob(asset.fileInfo.filename, asset.blob);
 
 	TArray<EchoMeshhResultNode> baseNodes;
 	if (data.Nodes.Num() < 1)
@@ -658,7 +774,7 @@ void UEchoMeshService::AttachMeshFromAsset(
 	if (echoActor != nullptr)
 	{
 		//show textures for debugging if importer verbose
-		if (UMeshLoader::importerVerboseTextures)
+		if (UEchoImporter::importerVerboseTextures)
 		{
 			for(const auto &texImport: data.Textures)
 			{
@@ -810,9 +926,12 @@ void UEchoMeshService::AttachMeshFromAsset(
 
 			UProceduralMeshComponent *meshComp = nd.meshComponent;
 			//now normaly done in CreateMeshNodeHelper2
-			if (meshComp->GetMaterial(0) == nullptr)
+			if (UEchoMeshService::GetMeshServiceDebugPrintMaterialInfo())
 			{
-				UE_LOG(LogTemp, Error, TEXT("No material to bind for meshcomponent child!"));
+				if (meshComp->GetMaterial(0) == nullptr)
+				{
+					UE_LOG(LogTemp, Error, TEXT("No material to bind for meshcomponent child!: %s"), *nd.nodeName);
+				}
 			}
 			meshComp->MarkRenderStateDirty();
 		}
@@ -883,21 +1002,11 @@ void UEchoMeshService::AttachMeshFromStorage(
 	AEcho3DService::RequestAsset(importConfig.connection, requestFile, EEchoAssetType::EEchoAsset_Mesh, bAllowCache, callback);
 }
 
-//crashes and burns =(
-//from https://nerivec.github.io/old-ue4-wiki/pages/enumtostring-macro.html
-//#define GETENUMSTRING(etype, evalue) ( (FindObject<UEnum>(ANY_PACKAGE, TEXT(etype), true) != nullptr) ? FindObject<UEnum>(ANY_PACKAGE, TEXT(etype), true)->GetEnumName((int32)evalue) : FString("Invalid - are you sure enum uses UENUM() macro?") )
-
-
-
-
-//void UEchoMeshService::Assemble(AActor *actor, const FEchoConnection &connection, const FEchoMemoryAssetArray &assets, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig)
-//void UEchoMeshService::Assemble(AActor *actor, const FEchoConnection &connection, const FEchoMemoryAssetArray &assets, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig)
-
+//formerly Assemble:
 void UEchoMeshService::AttachMeshFromAssetArray(
 	const FEchoImportConfig &importConfig, 
 	const FEchoImportMeshConfig &meshConfig,
 	const TArray<FEchoMemoryAsset> &assetList
-	//AActor *actor, const FEchoConnection &connection, const FEchoMemoryAssetArray &assets, UClass *spawnClass, const FEchoImportConfig &config, const FEchoActorTemplateResolution &actorConfig)
 )
 {
 	if (importConfig.importTitle.IsEmpty())
@@ -911,11 +1020,7 @@ void UEchoMeshService::AttachMeshFromAssetArray(
 	int found = 0;
 	for(const auto &asset: assetList)
 	{
-		//if this does not work, I'll be super sad that the advanced reflection system doesn't replace the need for a lowly int->string map setup
-		//FString assetTypeName = GETENUMSTRING("EEchoAssetType", asset.assetType);
-		//UE_LOG(LogTemp, Log, TEXT("Asset: %s: %s, length=%d"), *asset.fileInfo.filename, *assetTypeName, asset.content.Len());
-		//UE_LOG(LogTemp, Log, TEXT("Asset: %s: ==%d, length=%d"), *asset.fileInfo.filename, (int32)asset.assetType, asset.content.Len());
-		UE_LOG(LogTemp, Log, TEXT("Asset: %s: ==%d, length=%d"), *asset.fileInfo.filename, (int32)asset.assetType, asset.blob.Num());
+		//UE_LOG(LogTemp, Log, TEXT("Asset: %s: ==%d, length=%d"), *asset.fileInfo.filename, (int32)asset.assetType, asset.blob.Num());
 		if (asset.assetType == EEchoAssetType::EEchoAsset_Mesh)
 		{
 			//if (meshAsset != nullptr)
@@ -924,52 +1029,29 @@ void UEchoMeshService::AttachMeshFromAssetArray(
 				UE_LOG(LogTemp, Warning, TEXT("More than one EEchoAsset_Mesh found in results!"));
 			}
 			found++;
-			/*
-			meshAsset = &asset;
-			*/
-			{
-				//TODO: pass along other assets as well or some kind of asset resolver??
-				//correct way
-				//AttachMeshFromAsset(importConfig, meshConfig, *meshAsset);//, spawnClass, nullptr, config, actorConfig);
-				AttachMeshFromAsset(importConfig, meshConfig, asset);//, spawnClass, nullptr, config, actorConfig);
-			}
+			//TODO: pass along other assets as well or some kind of asset resolver??
+				
+			AttachMeshFromAsset(importConfig, meshConfig, asset);
 		}
 	}
 	if (found < 1)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Failed to identify any mesh assets in %s"), *importConfig.importTitle);
 	}
-	/*
-	if (meshAsset != nullptr)
-	{
-		//correct
-		//AttachMeshFromAsset(actor, connection, *meshAsset, spawnClass, nullptr);
-		
-		if (bDebugForceLocalFile)
-		{
-			//DEPRECATED CODE PATH
-			//local file hackery:
-			FEchoMemoryAsset localAsset; 
-			UEchoMeshService::DebugLoadAssetFromFile(FString(TEXT("C:\\work\\echo3D\\import-dev-media\\KronosTestSuite\\VertexColorTest.glb")), EEchoAssetType::EEchoAsset_Mesh, localAsset);
-			AttachMeshFromAsset(actor, connection, localAsset, spawnClass, nullptr, config, actorConfig);
-		}
-		else
-		{
-			//correct way
-			AttachMeshFromAsset(actor, connection, *meshAsset, spawnClass, nullptr, config, actorConfig);
-		}
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("Failed to identity meshAsset!"));
-	}
-	*/
 }
 
 //static props
 TWeakObjectPtr<UMaterial> UEchoMeshService::defaultMaterial = nullptr;
 FEchoCustomMeshImportSettings UEchoMeshService::defaultMeshSettings;
 bool UEchoMeshService::debugPrintMaterialInfo = false;
+bool UEchoMeshService::hideDefaultUnwantedWarnings = true;
+
+void UEchoMeshService::SetHideDefaultUnwantedWarnings(bool setHideDefaultUnwantedWarnings)
+{
+	hideDefaultUnwantedWarnings = setHideDefaultUnwantedWarnings;
+	//UEchoImporter::SetHideDEfaultUnwantedWarnings(setHideDefaultUnwantedWarnings);
+	UEchoImporter::SetHideDefaultUnwantedWarnings(setHideDefaultUnwantedWarnings);
+}
 
 //void UEchoMeshService::BindDefaultMaterial(const FString &matName, UMaterial *setDefaultMat)
 void UEchoMeshService::BindDefaultMaterial(UMaterial *setDefaultMat)
@@ -1060,11 +1142,6 @@ void UEchoMeshService::BindDebugTexture(const FName &texName, UTexture2D *setTex
 
 ///////////////////////////////////////////////////////////
 
-
-//bool ParseOneMaterialDefault(FEchoOneMaterial &result, AActor *owner, UMaterial *materialMaster, const FString &meshTitle, const FEchoMeshVariants &variant)
-//bool UEchoMeshService::ParseOneMaterialDefault(
-//UMaterialInterface *UEchoMeshService::ParseOneMaterialDefault(
-
 bool UEchoMeshService::CheckSupportedMeshVersion(const FString &callContext, const FEchoMeshVariants &forMeshVariant, int32 maxSupportedMeshVersion)
 {
 	//bool ret(forMeshVariant.meshFormatVersion <= maxSupportedMeshVersion);
@@ -1075,15 +1152,10 @@ bool UEchoMeshService::CheckSupportedMeshVersion(const FString &callContext, con
 	}
 	return ret;
 }
+
 UMaterialInstanceDynamic *UEchoMeshService::ParseOneMaterialDefault(
-	//FEchoOneMaterial &result, AActor *owner, UMaterial *materialMaster, const FString &meshTitle, const FEchoMeshVariants &variant
-	//const UObject *WorldContextObject,
 	UObject *WorldContextObject,
-	//UPARAM(ref)FEchoImportConfig & thisConfig, 
-	//AActor *owner,
-	//const FEchoImportConfig & thisConfig, 
 	const FString &importTitle, 
-	//const FEchoActorTemplateResolution &actorConfig,
 	const FFinalReturnData & materialResults, 
 	const FEchoImportMaterialData &forMaterial,
 	const FEchoMeshVariants &forMeshVariant,
@@ -1489,7 +1561,10 @@ UMaterialInstanceDynamic *UEchoMeshService::ParseOneMaterialDefault(
 		else
 		{
 			//No match.
-			UE_LOG(LogTemp, Error, TEXT("Unhandled Scalar Name: %s"), *prop.PropertyName.ToString());
+			if (!shouldIgnoreProperty(prop.PropertyName))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Unhandled Scalar Name: %s"), *prop.PropertyName.ToString());
+			}
 		}
 
 		const int *seenScorePtr = seenScalarScores.Find(remappedName);
@@ -1543,7 +1618,10 @@ UMaterialInstanceDynamic *UEchoMeshService::ParseOneMaterialDefault(
 		}
 		else
 		{
-			UE_LOG(LogTemp, Error, TEXT("Unhandled Vector Name: %s"), *prop.PropertyName.ToString());
+			if (!shouldIgnoreProperty(prop.PropertyName))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Unhandled Vector Name: %s"), *prop.PropertyName.ToString());
+			}
 		}
 		//UE_LOG(LogTemp, Error, TEXT("Vector Set: %s"), *remappedName.ToString());
 		matInstance->SetVectorParameterValue(remappedName, FLinearColor(prop.Value)); //gah -- maybe store as flinearcolor?
@@ -1559,6 +1637,18 @@ UMaterialInstanceDynamic *UEchoMeshService::ParseOneMaterialDefault(
 	//}
 }//END EVALMATDEFAULT
 
+void UEchoMeshService::ResetState()
+{
+	defaultMaterial = nullptr;
+	defaultMeshSettings = FEchoCustomMeshImportSettings();
+	debugTextureBindings.Reset();
+	debugPrintMaterialInfo = false;
+	hideDefaultUnwantedWarnings = true;
 
+	UEchoImporter::ResetState();
+
+
+	SetHideDefaultUnwantedWarnings( true );
+}
 
 #pragma optimize( "", on )

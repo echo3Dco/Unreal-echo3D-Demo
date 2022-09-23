@@ -285,11 +285,14 @@ bool ParseOneHologram(const FString &label, const FJsonObject *obj, FEchoHologra
 				if (!modelOk)
 				{
 					//TODO: maybe print what the storage type to use is called
-					UE_LOG(LogTemp, Warning, TEXT("WARN: Query[%d] no default whichtype found (filename key: %s, storage key: %s), trying default keys! hologram=%s, defaultType=%d"), 
-						queryDebugState.queryNumber,
-						*helper.filenameKey, *helper.storageIDKey,
-						*result.hologramId, (int)defaultStorageTypeToUse
-					);
+					if (AEcho3DService::GetVerboseMode())
+					{
+						UE_LOG(LogTemp, Warning, TEXT("WARN: Query[%d] no default whichtype found (filename key: %s, storage key: %s), trying default keys! hologram=%s, defaultType=%d"), 
+							queryDebugState.queryNumber,
+							*helper.filenameKey, *helper.storageIDKey,
+							*result.hologramId, (int)defaultStorageTypeToUse
+						);
+					}
 					modelOk = true;
 					const StorageMappingHelper &helper2 = LookupStorageHelper(UseWhichAdditionalStorage::UseDefaultFormat);
 					const FJsonObject *whichJsonObj2 = helper2.bAdditionalData ? additionalObj : hologramObj;
@@ -375,7 +378,9 @@ bool ParseOneHologram(const FString &label, const FJsonObject *obj, FEchoHologra
 
 //TODO: which service to use?
 bool AEcho3DService::bVerboseMode = false;
+bool AEcho3DService::bDebugTemplateOperations = false;
 bool AEcho3DService::logFailedQueries = false;
+bool AEcho3DService::hideDefaultUnwantedWarnings = true;
 
 TArray<FEchoCallback> AEcho3DService::queuedPostInitTasks;
 TWeakObjectPtr<UWorld> AEcho3DService::lastPlayWorld = nullptr;
@@ -675,12 +680,28 @@ bool TryPushStorageIfValid(FEchoAssetRequestArray &requests, const FEchoAssetReq
 	return true;
 }
 
-//void AEcho3DService::ResolveTemplateAndCreateConfig(UObject *WorldContextObject, FEchoImportConfig &ret, const FString &blueprintKey, const FEchoHologramInfo &hologramInfo)
-//void AEcho3DService::ResolveTemplateAndCreateConfig(UObject *WorldContextObject, FEchoImportConfig &ret, const FString &blueprintKey, const FEchoHologramInfo &hologramInfo)
-//const UEchoHologramBaseTemplate *AEcho3DService::ResolveTemplateAndCreateConfig(UObject *WorldContextObject, FEchoImportConfig &ret, const FString &blueprintKey, const FEchoHologramInfo &hologramInfo)
-//const UEchoHologramBaseTemplate *AEcho3DService::ResolveTemplateAndCreateConfig(UObject *WorldContextObject, FEchoImportConfig &ret, const UEchoHologramBaseTemplate *hologramTemplate, const FEchoHologramInfo &hologramInfo)
-//const UEchoHologramBaseTemplate *AEcho3DService::ResolveTemplateAndCreateConfig(UObject *WorldContextObject, const FEchoConnection &usingConnection, FEchoImportConfig &outputConfig, const UEchoHologramBaseTemplate *hologramTemplate, const FEchoHologramInfo &hologramInfo)
-//const UEchoHologramBaseTemplate *AEcho3DService::ResolveTemplateAndCreateConfig(UObject *WorldContextObject, const FEchoConnection &usingConnection, FEchoImportConfig &outputConfig, const UEchoHologramBaseTemplate *hologramTemplate, const FEchoHologramInfo &hologramInfo)
+void AEcho3DService::SetDefaultTemplateByClass(TSubclassOf<UEchoHologramBaseTemplate> setDefaultClass)
+{
+	//what if setDefaultClass is null? lets just do this and warn if we get a class holding nullptr for now - they can cal setDefaultTemplate null if they want
+	if (setDefaultClass == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetDefaultTemplateByClass called with nullptr for class"));
+		ClearDefaultTemplate();
+		return;
+	}
+	SetDefaultTemplateImpl(ResolveTemplateFromClass(setDefaultClass), false);
+}
+
+void AEcho3DService::SetDefaultTemplateImpl(const UEchoHologramBaseTemplate *setDefaultTemplate, bool bNullExpected)
+{
+	bool bNullMatched = (setDefaultTemplate == nullptr) == bNullExpected;
+	if (!bNullMatched)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetDefaultTemplateImpl: null case unexpected! setDefaultTemplate: %p, expected null? %s"), (void*)setDefaultTemplate, *StringUtil::BoolToString(bNullMatched));
+	}
+	defaultTemplate = TStrongObjectPtr<const UEchoHologramBaseTemplate>(setDefaultTemplate);
+}
+
 const UEchoHologramBaseTemplate *AEcho3DService::ResolveTemplateAndCreateConfig(
 	UObject *WorldContextObject, const FEchoConnection &usingConnection, const FEchoHologramInfo &hologramInfo,
 	const UEchoHologramBaseTemplate *hologramTemplate,
@@ -741,8 +762,11 @@ const UEchoHologramBaseTemplate *AEcho3DService::ResolveTemplateAndCreateConfig(
 	//NB: print before abstract test so we can still see the results
 	{
 		//TODO: can getclass ever return null?
-		const FString &templateNameFound = (hologramTemplate != nullptr) ? hologramTemplate->GetClass()->GetName() : EchoStringConstants::NullString;
-		UE_LOG(LogTemp, Error, TEXT("DEDUCED TEMPLATE FOR Hologram: %s (model %s): %s"), *hologramInfo.hologramId, *hologramInfo.modelInfo.model.filename, *templateNameFound);
+		if (bDebugTemplateOperations)
+		{
+			const FString &templateNameFound = (hologramTemplate != nullptr) ? hologramTemplate->GetClass()->GetName() : EchoStringConstants::NullString;
+			UE_LOG(LogTemp, Error, TEXT("DEDUCED TEMPLATE FOR Hologram: %s (model %s): %s"), *hologramInfo.hologramId, *hologramInfo.modelInfo.model.filename, *templateNameFound);
+		}
 	}
 
 	//const UEchoHologramBaseTemplate *retUserTemplate = userTemplate;
@@ -1043,11 +1067,16 @@ FEchoConstructActorResult AEcho3DService::ConstructBaseActor(
 	ret.actor = nullptr;
 	ret.userComponent = nullptr;
 
-	UE_LOG(LogTemp, Warning, TEXT("TODO: implement Echo3DService::ConstructBaseObject"));
-	UObject *WorldContextObject = importConfig.WorldContextObject;
+	//UE_LOG(LogTemp, Warning, TEXT("TODO: implement Echo3DService::ConstructBaseObject"));
+	UObject *WorldContextObject = importConfig.WorldContextObject.Get();
+	if (importConfig.WorldContextObject.IsStale())
+	{
+		UE_LOG(LogTemp, Error, TEXT("ConstructBaseActor: WCO is stale!"));
+		return ret;
+	}
 	if (WorldContextObject == nullptr)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ConstructBaseObject: WorldContextObject is nullptr!"));
+		UE_LOG(LogTemp, Error, TEXT("ConstructBaseActor: WorldContextObject is nullptr!"));
 		return ret;
 	}
 
@@ -1391,7 +1420,13 @@ namespace
 	}
 
 	//debug settings
-	const bool logAllQueryEvents = true;
+	//const bool logAllQueryEvents = true;
+	const bool logAllQueryEvents = false;
+
+	bool shouldLogVerboseQueryEvent()
+	{
+		return AEcho3DService::GetVerboseMode() || logAllQueryEvents;
+	}
 };
 
 //void AEcho3DService::DoEchoRequest(const FString &requestURL, const FEchoRequestHandler &callback)
@@ -1421,19 +1456,22 @@ FEchoRequestResultInfo AEcho3DService::DoEchoRequest(const FString &requestURL, 
 	//TODO: maybe not have query number as debug but as something returned that can be cancelled/queried??
 	if (bVerboseMode)
 	{
+		//THIS IS CONFUSING TO SHOW AS AN ERROR
+		
 		//PRIu64
 		//static_assert( TEXT(ECHO_FORMAT_ARG_UINT64) == L"%llu", "WTF");
 		//UE_LOG(LogTemp, Error, TEXT("[VERBOSEMODE} GET[" ECHO_FORMAT_ARG_UINT64 "]: %s"), queryDebugState.queryNumber, *requestURL);
 		//const TCHAR* desu2 = TEXT("[VERBOSEMODE} GET[" ECHO_FORMAT_ARG_UINT64 "]: %s");
 		//UE_LOG(LogTemp, Error, TEXT("[VERBOSEMODE} GET[" ECHO_FORMAT_ARG_UINT64 "]: %s"), queryDebugState.queryNumber, *queryDebugState.query);
-		UE_LOG(LogTemp, Error, TEXT(ECHO_QUERY_LOG_PREFIX "GET: %s"), queryDebugState.queryNumber, *queryDebugState.query);
+		UE_LOG(LogTemp, Display, TEXT(ECHO_QUERY_LOG_PREFIX "GET: %s"), queryDebugState.queryNumber, *queryDebugState.query);
 	}
+	/*
 	else
 	{
 		//UE_LOG(LogTemp, Log, TEXT("GET[" ECHO_FORMAT_ARG_UINT64 "]: %s"), queryDebugState.queryNumber,  *requestURL);
 		//UE_LOG(LogTemp, Log, TEXT("GET[" ECHO_FORMAT_ARG_UINT64 "]: %s"), queryDebugState.queryNumber, *queryDebugState.query);
 		UE_LOG(LogTemp, Log, TEXT(ECHO_QUERY_LOG_PREFIX "GET: %s"), queryDebugState.queryNumber, *queryDebugState.query);
-	}
+	}*/
 	
 	/*if (logAllQueryEvents)
 	{
@@ -1444,7 +1482,8 @@ FEchoRequestResultInfo AEcho3DService::DoEchoRequest(const FString &requestURL, 
 	//HttpRequest->OnProcessRequestComplete().BindLambda([callback, urlCopy, callbackCopy](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess)
 	HttpRequest->OnProcessRequestComplete().BindLambda([callback, queryDebugState, callbackCopy](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess)
 	{
-		if (logAllQueryEvents)
+		//if (logAllQueryEvents)
+		if (shouldLogVerboseQueryEvent())
 		{
 			//UE_LOG(LogTemp, Log, TEXT("GOT[%llu]: %s"), queryDebugState.queryNumber, *queryDebugState.query);
 			UE_LOG(LogTemp, Log, TEXT( ECHO_QUERY_LOG_PREFIX "GOT: %s"), queryDebugState.queryNumber, *queryDebugState.query);
@@ -1617,7 +1656,8 @@ void AEcho3DService::RequestAsset(const FEchoConnection &connection, const FEcho
 		callbackCopy.Execute(asset);
 	});
 	const FEchoRequestResultInfo queryInfo = AEcho3DService::DoEchoRequest(url, callbackAdaptor);
-	if (logAllQueryEvents)
+	//if (logAllQueryEvents)
+	if (shouldLogVerboseQueryEvent())
 	{
 		//UE_LOG(LogTemp, Error, TEXT(ECHO_QUERY_LOG_PREFIX "Requesting Storage: filename='%s', storageId='%s'"), queryInfo.queryNumber, *storageCopy.filename, *storageCopy.storageId);
 		//UE_LOG(LogTemp, Log, TEXT(ECHO_QUERY_LOG_PREFIX "Requesting Storage: " "\n\tRequestId: " ECHO_FORMAT_ARG_UINT64 "\n\tRequestURL: %s\n\tFilename='%s'\n\tStorageId='%s'"), rawQuery.debugInfo.queryNumber, rawQuery.debugInfo.queryNumber, *rawQuery.debugInfo.query, *storageCopy.filename, *storageCopy.storageId);
@@ -1682,7 +1722,11 @@ void AEcho3DService::RequestAssets(const FEchoConnection &connection, const FEch
 		TArray<FEchoMemoryAsset> &results = resultsRef.Get();
 		results.Push(asset);
 		int numAssetsRecieved = results.Num();
-		UE_LOG(LogTemp, Error, TEXT("GOT ASSET: Filename:'%s' - %d / %d -- Storage='%s'"), *asset.fileInfo.filename, numAssetsRecieved, requestsCopy.Num(), *asset.fileInfo.storageId);
+
+		if (shouldLogVerboseQueryEvent())
+		{
+			UE_LOG(LogTemp, Display, TEXT("GOT ASSET: Filename:'%s' - %d / %d -- Storage='%s'"), *asset.fileInfo.filename, numAssetsRecieved, requestsCopy.Num(), *asset.fileInfo.storageId);
+		}
 		if (numAssetsRecieved >= requestsCopy.Num())
 		{
 			//finished
@@ -1703,8 +1747,11 @@ void AEcho3DService::RequestAssets(const FEchoConnection &connection, const FEch
 			{
 				int numResults = results.Num();
 				const FEchoFile &requestFile = requestsCopy[numResults].fileInfo;
-				UE_LOG(LogTemp, Warning, TEXT("Requesting %d / %d: '%s' @ '%s'"), numResults+1, requestsCopy.Num(), *requestFile.filename, *requestFile.storageId);
-		
+				if (shouldLogVerboseQueryEvent())
+				{
+					//UE_LOG(LogTemp, Warning, TEXT("Requesting %d / %d: '%s' @ '%s'"), numResults+1, requestsCopy.Num(), *requestFile.filename, *requestFile.storageId);
+					UE_LOG(LogTemp, Display, TEXT("Requesting %d / %d: '%s' @ '%s'"), numResults+1, requestsCopy.Num(), *requestFile.filename, *requestFile.storageId);
+				}
 				AEcho3DService::RequestAsset(connectionCopy, requestFile, requestsCopy[numResults].assetType, requestsCopy[numResults].bAllowCache, visitorCallbackRef.Get());
 			}
 		}
@@ -1716,45 +1763,13 @@ void AEcho3DService::RequestAssets(const FEchoConnection &connection, const FEch
 		TArray<FEchoMemoryAsset> &results = resultsRef.Get();
 		int numResults = results.Num();
 		const FEchoFile &requestFile = requestsCopy[numResults].fileInfo;
-		UE_LOG(LogTemp, Warning, TEXT("Requesting %d / %d: '%s' @ '%s'"), numResults+1, requestsCopy.Num(), *requestFile.filename, *requestFile.storageId);
+		if (shouldLogVerboseQueryEvent())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Requesting %d / %d: '%s' @ '%s'"), numResults+1, requestsCopy.Num(), *requestFile.filename, *requestFile.storageId);
+		}
 		AEcho3DService::RequestAsset(connectionCopy, requestFile, requestsCopy[numResults].assetType, requestsCopy[numResults].bAllowCache, visitorCallbackRef.Get());
 	}
 }
-
-
-
-/////////////////////////////////////////////////// OLD
-/*
-// Sets default values
-AEcho3DService::AEcho3DService()
-{
- 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
-
-}
-
-// Called when the game starts or when spawned
-void AEcho3DService::BeginPlay()
-{
-	Super::BeginPlay();
-	
-}
-
-// Called every frame
-void AEcho3DService::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-}
-*/
-/*
-void AEcho3DService::RequestAllMulticast()
-{
-	UE_LOG(LogTemp, Error, TEXT("enter RequestAllMulticast"));
-	this->requestHandlersTest.Broadcast();
-	UE_LOG(LogTemp, Error, TEXT("exit RequestAllMulticast"));
-}
-*/
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -1784,6 +1799,9 @@ void AEcho3DService::ResetState()//const UObject *WorldContextObject)
 	defaultTemplate = nullptr;
 	bVerboseMode = false;
 	logFailedQueries = false;
+	bDebugTemplateOperations = false;
+	hideDefaultUnwantedWarnings = true;
+
 	bInitCalled = false;
 	//TODO: how to safely reset queued tasks???
 	//TODO: going to just assume they're stale or reset when the world changed when queued
@@ -1867,10 +1885,17 @@ void AEcho3DService::CheckForNewRun(const UObject *WorldContextObject)
 
 void AEcho3DService::OnStaticReset()
 {
-	UE_LOG(LogTemp, Error, TEXT("[========================================== OnStaticInit ==========================================]"));
+	UE_LOG(LogTemp, Display, TEXT("[========================================== OnStaticInit ==========================================]"));
 	bInitCalled = false;
 	queuedPostInitTasks.Reset();
 	ResetState();
+}
+
+
+void AEcho3DService::SetHideDefaultUnwantedWarnings(bool setHideDefaultUnwantedWarnings)
+{
+	hideDefaultUnwantedWarnings = setHideDefaultUnwantedWarnings;
+	UEchoMeshService::SetHideDefaultUnwantedWarnings(setHideDefaultUnwantedWarnings);
 }
 
 #pragma optimize( "", on )

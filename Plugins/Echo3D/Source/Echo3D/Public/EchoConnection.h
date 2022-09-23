@@ -3,7 +3,10 @@
 
 //Note: FEchoAssetRequestArray, FEchoMemoryAssetArray are only in EchoStructsFwd since they're typedefs
 
-//This contains a bunch of basic "echo" types used in various places.
+/**
+ * This contains a bunch of basic "echo" structs and types used in various places.
+ * its poorly named after the first such struct added.
+**/
 //TODO: rename to something like EchoTypes.h or something?
 
 #include "CoreMinimal.h"
@@ -80,7 +83,10 @@ struct ECHO3D_API FEchoRequestResultInfo
 	uint64 queryNumber;
 };
 
-
+/**
+ * time measurement opaque to blueprint but with a blueprintfunctionlibrary elsewhere to make sense of it
+ * not particularly useful at the moment
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoTimeMeasurement
 {
@@ -91,7 +97,10 @@ struct ECHO3D_API FEchoTimeMeasurement
 	double raw;
 };
 
-
+/**
+ * information about a "storage".
+ * used both to make the storage request and as debugging info
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoFile
 {
@@ -107,6 +116,7 @@ struct ECHO3D_API FEchoFile
 
 	FEchoFile() = default;
 	~FEchoFile() = default;
+
 	FEchoFile(const FString &setStorageId, const FString &setFilename)
 	 : storageId( setStorageId ), filename( setFilename )
 	{
@@ -118,7 +128,10 @@ struct ECHO3D_API FEchoFile
 	}
 };
 
-
+/**
+ * contains information about a model determined from its model json.
+ * not super useful anymore other than the model file since everything now uses GLBs
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoModelInfo
 {
@@ -135,7 +148,9 @@ struct ECHO3D_API FEchoModelInfo
 	FEchoFile material;
 };
 
-
+/**
+ * a wrapper for the additional meta data that can be configured in the echo website for each entry
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoAdditionalData
 {
@@ -219,22 +234,37 @@ public: //for clarity, structs public by default
 	}
 };
 
+/**
+ * information about a hologram
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoHologramInfo
 {
 	GENERATED_BODY()
 
+	/**
+	 * the echo "id" of the hologram
+	**/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	FString hologramId;
 
+	/**
+	 * our parsed modelInfo
+	**/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	FEchoModelInfo modelInfo;
 
+	/**
+	 * our meta data
+	**/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	FEchoAdditionalData additionalData;
 };
 
 //TODO: should this just be opaque?
+/**
+ * some debug information about a hologram
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoQueryDebugInfo
 {
@@ -255,52 +285,68 @@ struct ECHO3D_API FEchoRawQueryResult
 	//UPROPERTY(BlueprintReadOnly, Category = "Echo3D|EchoField")
 	//FString sourceQuery;
 
+	/**
+	 * holder for debug info. the idea is to eventually hide this in production-y builds or not set it if certain debug flags are not set for performance reasons... maybe
+	**/
 	UPROPERTY(BlueprintReadOnly, Category = "Echo3D|EchoField")
 	FEchoQueryDebugInfo debugInfo;
 
+	/**
+	 * if the query was a success. unlike for the http connection this is that we have non-zero data as well not just we made a tcp connection
+	**/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	bool bSuccess;
 
+	/**
+	 * a blob with our results.
+	**/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	TArray<uint8> contentBlob; //FEchoBlob
 
+	/**
+	 * helper to correctly convert to FString. potentially very expensive especially on typically non-string things like huge model files or textures
+	**/
 	FString GetContentAsString() const;
-	/*
-	{
-		return EchoHelperLib::StringFromRawContent(contentBlob);
-	}
-	*/
-
+	
 	FEchoRawQueryResult() = default;
 	~FEchoRawQueryResult() = default;
 
-	//FEchoRawQueryResult(const FString &setSource, bool setSuccess, const FEchoBlob &setContentBlob)
 	FEchoRawQueryResult(const FEchoQueryDebugInfo &setDebugInfo, bool setSuccess, const FEchoBlob &setContentBlob)
 	 : debugInfo(setDebugInfo), bSuccess(setSuccess), contentBlob( setContentBlob )
 	{
 	}
 };
 
+/**
+ * a bunch of parsed holograms from a hologram query and some error/warning data
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoHologramQueryResult
 {
 	GENERATED_BODY()
 	
+	/** was the input query valid - carried forward here **/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	bool isValid = false;
 
+	/** if we had warnings processing the json **/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	bool hadWarnings = false;
 
+	/** how many holograms we omitted from the results because we could not understand them **/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	int32 numMissing = 0;
 
+	/** the array of holograms we parsed **/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Echo3D|EchoField")
 	TArray<FEchoHologramInfo> holograms;
 
 };
 
-
+/**
+ * helper enum to track the source of an asset. not really used atm. meant to help identify if an asset came from a request or from within another asset (like an embedded texture etc).
+ * not very useful atm
+**/
 UENUM() 
 enum class EEchoAssetSource: uint8
 {
@@ -309,6 +355,9 @@ enum class EEchoAssetSource: uint8
 	EchoAssetSource_FromAsset,
 };
 
+/**
+ * some debug info about an asset
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoAssetDebugInfo
 {
@@ -318,7 +367,9 @@ struct ECHO3D_API FEchoAssetDebugInfo
 	FEchoQueryDebugInfo sourceQuery;
 };
 
-
+/**
+ * a list of asset types. not super useful atm
+**/
 UENUM()
 enum class EEchoAssetType : uint8
 {
@@ -329,8 +380,9 @@ enum class EEchoAssetType : uint8
 	EEchoAsset_Animation = 4,
 };
 
-//TODO: asset query counter?
-
+/**
+ * an asset as a blob in memory
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoMemoryAsset
 {
@@ -362,6 +414,9 @@ struct ECHO3D_API FEchoMemoryAsset
 	//double cachedAt;
 };
 
+/**
+ * an asset that we can request
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoAssetRequest
 {
@@ -377,6 +432,10 @@ struct ECHO3D_API FEchoAssetRequest
 	bool bAllowCache = true;
 };
 
+/**
+ * which echo mesh variant of a material are we requesting?
+ * used with EchoMaterialBaseTemplate's EvalMaterial
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoMeshVariants
 {
@@ -393,7 +452,10 @@ struct ECHO3D_API FEchoMeshVariants
 };
 
 typedef struct FEchoImportConfigPin;
-
+//TODO: rename to hologramConfig or importHologramConfig or something like that
+/**
+ * all the general import information for a template in one argument
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoImportConfig
 {
@@ -413,7 +475,8 @@ struct ECHO3D_API FEchoImportConfig
 	 * our world context object
 	**/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoImportConfig")
-	UObject *WorldContextObject;
+	//UObject *WorldContextObject;
+	TWeakObjectPtr<UObject> WorldContextObject;
 
 	/**
 	 * a string to help identify the import in question easily. mostly useful for debugging
@@ -448,13 +511,13 @@ struct ECHO3D_API FEchoImportConfig
 	FEchoConnection connection;
 
 	FEchoImportConfigPin Pin() const;
+
+	bool IsStale() const
+	{
+		return (WorldContextObject.IsStale());
+	}
 };
 
-
-
-
-//TODO: possibly deprecate this? or have some kind of UObject config created by the template and passed back to it?
-//TODO: does reachability work for ustructs???
 /**
  * used to pin the an import config from garbage collection
  * TODO: figure out how to addrefernce or something instead of a bunch of heavy tstrongobjectptrs?
@@ -470,7 +533,7 @@ struct FEchoImportConfigPin
 
 	FEchoImportConfigPin(const FEchoImportConfig &fromConfig)
 	 : pinnedConfig( fromConfig )
-	 , WorldContextObject( fromConfig.WorldContextObject )
+	 , WorldContextObject( fromConfig.WorldContextObject.Get() )
 	 , hologramTemplate( fromConfig.hologramTemplate )
 	 , instanceState( fromConfig.instanceState )
 	 , nullMask( 0 )
@@ -522,6 +585,9 @@ struct FEchoImportConfigPin
 
 //should this move to what should be called echotypes.h?(echoconnection.h)
 //struct CustomMeshConfig
+/**
+ * some specific mesh import settings
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoCustomMeshImportSettings
 {
@@ -563,25 +629,19 @@ struct ECHO3D_API FEchoCustomMeshImportSettings
 typedef struct FEchoImportMeshConfigPin;
 //TODO: split this up, probably into FEchoImportMaterialConfig and 
 //TODO: how to ensure we've kept this struct and its contents from being garbage collected????
+
+/**
+ * mesh/model import arguments in one place
+**/
 USTRUCT(BlueprintType)
-//struct ECHO3D_API FEchoImportMaterialConfig
 struct ECHO3D_API FEchoImportMeshConfig
 {
 	GENERATED_BODY()
 
 	/**
-	 * our world context object
-	**/
-	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoImportConfig")
-	//UObject *WorldContextObject;
-
-	/**
 	 * our material template
 	**/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoMaterials")
-	//TWeakObjectPtr<const UEchoMaterialBaseTemplate> *materialTemplate;
-	//TWeakObjectPtr<const UEchoImportMaterialTemplate> materialTemplate;
-	//TWeakObjectPtr<const UEchoMaterialBaseTemplate> materialTemplate;
 	const UEchoMaterialBaseTemplate *materialTemplate;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoMesh")
@@ -589,34 +649,14 @@ struct ECHO3D_API FEchoImportMeshConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoMesh")
 	TWeakObjectPtr<AActor> actor;
-	 
-	//This should probably at best be a tsubclass of something. it probalby wants to be deprecated/removed
-	//is this actually sane?
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoMesh")
-	UClass *spawnClass;
-	//TStrongObjectPtr<UClass> spawnClass; 
-	//TWeakClassPtr<UClass> spawnClass; 
-	//TStrongObjectPtr<UClass> 
-	//TWeakClassPtr<UClass> spawnClass; 
-	//TWeakObjectPtr<UClass> spawnClass; 
 
-	//TWeakObjectPtr<UClass> spawnClass;
-	//TStrongObjectPtr<UClass> spawnClass;
-	//TWeakObjectPtr<UClass> spawnClass;
-	//TWeakClassPtr<UClass> spawnClass;
-	//TODO: custom scene componenet classes?
-	
-	/*
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoMesh")
-	AActor *actor;
-	 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EchoMesh")
-	UClass *spawnClass;
-	*/
 	FEchoImportMeshConfigPin Pin() const;
 };
 
 //TODO: possibly store these in our engine subsystem directly when requested??
+/**
+ * helper meant ot pin a meshconfig struct's contents across a delayed lambda
+**/
 struct FEchoImportMeshConfigPin
 {
 	//TODO: do some of these just want to be weak and we can store if they were stale?
@@ -631,7 +671,7 @@ struct FEchoImportMeshConfigPin
 	FEchoImportMeshConfigPin(const FEchoImportMeshConfig &fromConfig)
 	 : pinnedConfig( fromConfig )
 	 , materialTemplate( fromConfig.materialTemplate )
-	 , spawnClass( fromConfig.spawnClass )
+	 //, spawnClass( fromConfig.spawnClass )
 	 , nullMask( 0 )
 	{
 		nullMask = GetNullMask(pinnedConfig);
@@ -643,7 +683,7 @@ struct FEchoImportMeshConfigPin
 
 		//special handling for uobjects
 		ret.materialTemplate = this->materialTemplate.Get();
-		ret.spawnClass = this->spawnClass.Get();
+		//ret.spawnClass = this->spawnClass.Get();
 		bool match = (nullMask == GetNullMask(ret));
 		return match;
 	}
@@ -652,7 +692,7 @@ struct FEchoImportMeshConfigPin
 	{
 		return 0
 			| (((config.materialTemplate != nullptr ) ? 1 : 0) << 0)
-			| (((config.spawnClass != nullptr ) ? 1 : 0) << 1)
+			//| (((config.spawnClass != nullptr ) ? 1 : 0) << 1)
 		;
 	}
 
@@ -667,6 +707,9 @@ struct FEchoImportMeshConfigPin
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/**
+ * the result of an actor template
+**/
 USTRUCT(BlueprintType)
 struct ECHO3D_API FEchoConstructActorResult
 {
@@ -689,16 +732,12 @@ public:
 // Delegate definitions
 
 DECLARE_DELEGATE_OneParam(FEchoRequestHandler, const FEchoRawQueryResult&);
-//DECLARE_DELEGATE_OneParam(FEchoBinaryRequestHandler, const FEchoRawBinaryQueryResult&);
-	
-//original
-//DECLARE_DYNAMIC_DELEGATE_ThreeParams(FEchoHologramQueryHandler, const FEchoConnection&, connection, const FString&, blueprintKey, const FEchoHologramQueryResult&, holoQuery);
+
 DECLARE_DYNAMIC_DELEGATE_ThreeParams(FEchoHologramQueryHandler, const FEchoConnection&, connection, const UEchoHologramBaseTemplate *, hologramTemplate, const FEchoHologramQueryResult&, holoQuery);
 	
 DECLARE_DYNAMIC_DELEGATE_OneParam(FEchoMemoryAssetCallbackBP, const FEchoMemoryAsset &, asset);
 DECLARE_DELEGATE_OneParam(FEchoMemoryAssetCallback, const FEchoMemoryAsset & /*, asset*/);
 
-//DECLARE_DELEGATE_OneParam(FEchoMemoryAssetArrayCallback, const FEchoMemoryAssetArray &);
 DECLARE_DELEGATE_OneParam(FEchoMemoryAssetArrayCallback, const FEchoMemoryAssetArray &);
 
 DECLARE_DYNAMIC_DELEGATE(FEchoCallback);
